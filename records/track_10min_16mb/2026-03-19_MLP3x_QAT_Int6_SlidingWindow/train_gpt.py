@@ -17,6 +17,10 @@ import sys
 import time
 import uuid
 import zlib
+try:
+    import zstandard as zstd_mod
+except ImportError:
+    zstd_mod = None
 from pathlib import Path
 
 import numpy as np
@@ -76,6 +80,9 @@ class Hyperparameters:
     eval_stride = int(os.environ.get("EVAL_STRIDE", "0"))
     eval_seq_len = int(os.environ.get("EVAL_SEQ_LEN", "0"))
     eval_batch_size = int(os.environ.get("EVAL_BATCH_SIZE", "32"))
+    eval_ntk_alpha = float(os.environ.get("EVAL_NTK_ALPHA", "0"))
+    block_lars_trust = float(os.environ.get("BLOCK_LARS_TRUST", "0"))
+    block_lars_min_scale = float(os.environ.get("BLOCK_LARS_MIN_SCALE", "0.01"))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
 
     # Optimizer hyperparameters.
@@ -89,6 +96,11 @@ class Hyperparameters:
     muon_backend_steps = int(os.environ.get("MUON_BACKEND_STEPS", 5))
     muon_momentum_warmup_start = float(os.environ.get("MUON_MOMENTUM_WARMUP_START", 0.85))
     muon_momentum_warmup_steps = int(os.environ.get("MUON_MOMENTUM_WARMUP_STEPS", 500))
+    muon_weight_decay = float(os.environ.get("MUON_WEIGHT_DECAY", 0.0))
+    adam_weight_decay = float(os.environ.get("ADAM_WEIGHT_DECAY", 0.0))
+    swa_start_frac = float(os.environ.get("SWA_START_FRAC", 0.0))
+    use_zstd = bool(int(os.environ.get("USE_ZSTD", "0")))
+    zstd_level = int(os.environ.get("ZSTD_LEVEL", 22))
     beta1 = float(os.environ.get("BETA1", 0.9))
     beta2 = float(os.environ.get("BETA2", 0.95))
     adam_eps = float(os.environ.get("ADAM_EPS", 1e-8))
@@ -587,24 +599,34 @@ class Rotary(nn.Module):
     # Caches cos/sin tables per sequence length on the current device.
     def __init__(self, dim: int, base: float = 10000.0):
         super().__init__()
+        self.dim = dim
+        self.base = base
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self._seq_len_cached = 0
+        self._ntk_alpha_cached = 0.0
         self._cos_cached: Tensor | None = None
         self._sin_cached: Tensor | None = None
 
-    def forward(self, seq_len: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, Tensor]:
+    def forward(self, seq_len: int, device: torch.device, dtype: torch.dtype, ntk_alpha: float = 0.0) -> tuple[Tensor, Tensor]:
         if (
             self._cos_cached is None
             or self._sin_cached is None
             or self._seq_len_cached != seq_len
+            or self._ntk_alpha_cached != ntk_alpha
             or self._cos_cached.device != device
         ):
-            t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
-            freqs = torch.outer(t, self.inv_freq.to(device))
+            if ntk_alpha > 0:
+                base_scaled = self.base * ntk_alpha
+                inv_freq = 1.0 / (base_scaled ** (torch.arange(0, self.dim, 2, dtype=torch.float32, device=device) / self.dim))
+            else:
+                inv_freq = self.inv_freq.to(device)
+            t = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
+            freqs = torch.outer(t, inv_freq)
             self._cos_cached = freqs.cos()[None, None, :, :]
             self._sin_cached = freqs.sin()[None, None, :, :]
             self._seq_len_cached = seq_len
+            self._ntk_alpha_cached = ntk_alpha
         return self._cos_cached.to(dtype=dtype), self._sin_cached.to(dtype=dtype)
 
 
@@ -649,7 +671,8 @@ class CausalSelfAttention(nn.Module):
         v = self.c_v(x).reshape(bsz, seqlen, self.num_kv_heads, self.head_dim).transpose(1, 2)
         q = F.rms_norm(q, (q.size(-1),))
         k = F.rms_norm(k, (k.size(-1),))
-        cos, sin = self.rotary(seqlen, x.device, q.dtype)
+        ntk_alpha = getattr(self, "_ntk_alpha", 0.0)
+        cos, sin = self.rotary(seqlen, x.device, q.dtype, ntk_alpha=ntk_alpha)
         q = apply_rotary_emb(q, cos, sin)
         k = apply_rotary_emb(k, cos, sin)
         q = q * self.q_gain.to(dtype=q.dtype)[None, :, None, None]
@@ -786,6 +809,46 @@ class GPT(nn.Module):
         return F.cross_entropy(logits.float(), targets, reduction="mean")
 
 
+
+
+class BlockLARS:
+    """Block-level LARS: scale gradients per block (attn/mlp/other) by trust * ||W|| / ||grad||."""
+    def __init__(self, model: nn.Module, trust: float = 0.02, min_scale: float = 0.01, max_scale: float = 20.0):
+        self.trust = trust
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+        self.blocks: dict[str, list[nn.Parameter]] = {"attn": [], "mlp": [], "other": []}
+        for name, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+            if "attn" in name:
+                self.blocks["attn"].append(p)
+            elif "mlp" in name:
+                self.blocks["mlp"].append(p)
+            else:
+                self.blocks["other"].append(p)
+        self.blocks = {k: v for k, v in self.blocks.items() if v}
+
+    @torch.no_grad()
+    def step(self) -> None:
+        for params in self.blocks.values():
+            w_sq = sum(p.data.norm().item() ** 2 for p in params)
+            g_sq = sum(p.grad.data.norm().item() ** 2 for p in params if p.grad is not None)
+            w_norm, g_norm = w_sq ** 0.5, g_sq ** 0.5
+            if g_norm > 1e-8:
+                scale = max(self.min_scale, min(self.max_scale, self.trust * w_norm / g_norm))
+            else:
+                scale = 1.0
+            for p in params:
+                if p.grad is not None:
+                    p.grad.data.mul_(scale)
+
+
+def set_ntk_alpha(model: nn.Module, alpha: float) -> None:
+    """Set NTK-aware RoPE scaling on all attention modules."""
+    for module in model.modules():
+        if isinstance(module, CausalSelfAttention):
+            module._ntk_alpha = alpha
 
 
 def forward_logits(model: nn.Module, input_ids: Tensor) -> Tensor:
@@ -1025,10 +1088,13 @@ def main() -> None:
     if base_model.skip_weights.numel() > 0:
         scalar_params.append(base_model.skip_weights)
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
-    optimizer_tok = torch.optim.Adam(
+    AdamCls = torch.optim.AdamW if args.adam_weight_decay > 0 else torch.optim.Adam
+    adam_wd = args.adam_weight_decay
+    optimizer_tok = AdamCls(
         [{"params": [base_model.tok_emb.weight], "lr": token_lr, "base_lr": token_lr}],
         betas=(args.beta1, args.beta2),
         eps=args.adam_eps,
+        weight_decay=adam_wd,
         fused=True,
     )
     optimizer_muon = Muon(
@@ -1039,18 +1105,20 @@ def main() -> None:
     )
     for group in optimizer_muon.param_groups:
         group["base_lr"] = args.matrix_lr
-    optimizer_scalar = torch.optim.Adam(
+    optimizer_scalar = AdamCls(
         [{"params": scalar_params, "lr": args.scalar_lr, "base_lr": args.scalar_lr}],
         betas=(args.beta1, args.beta2),
         eps=args.adam_eps,
+        weight_decay=adam_wd,
         fused=True,
     )
     optimizers: list[torch.optim.Optimizer] = [optimizer_tok, optimizer_muon, optimizer_scalar]
     if base_model.lm_head is not None:
-        optimizer_head = torch.optim.Adam(
+        optimizer_head = AdamCls(
             [{"params": [base_model.lm_head.weight], "lr": args.head_lr, "base_lr": args.head_lr}],
             betas=(args.beta1, args.beta2),
             eps=args.adam_eps,
+            weight_decay=adam_wd,
             fused=True,
         )
         optimizers.insert(1, optimizer_head)
@@ -1077,6 +1145,7 @@ def main() -> None:
     # -----------------------------
 
     train_loader = DistributedTokenLoader(args.train_files, rank, world_size, device)
+    block_lars = BlockLARS(base_model, trust=args.block_lars_trust, min_scale=args.block_lars_min_scale) if args.block_lars_trust > 0 else None
 
     def zero_grad_all() -> None:
         for opt in optimizers:
@@ -1129,6 +1198,9 @@ def main() -> None:
 
     training_time_ms = 0.0
     stop_after_step: int | None = None
+    # SWA state
+    swa_state: dict[str, Tensor] | None = None
+    swa_count = 0
     torch.cuda.synchronize()
     t0 = time.perf_counter()
 
@@ -1192,9 +1264,27 @@ def main() -> None:
 
         if args.grad_clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(base_model.parameters(), args.grad_clip_norm)
+        if args.block_lars_trust > 0:
+            block_lars.step()
         for opt in optimizers:
             opt.step()
+        # Decoupled weight decay on Muon (matrix) params
+        if args.muon_weight_decay > 0:
+            with torch.no_grad():
+                muon_lr = optimizer_muon.param_groups[0]["lr"]
+                for p in matrix_params:
+                    p.mul_(1.0 - muon_lr * args.muon_weight_decay)
         zero_grad_all()
+
+        # SWA: accumulate weight average during warmdown
+        if args.swa_start_frac > 0 and scale < args.swa_start_frac:
+            if swa_state is None:
+                swa_state = {k: v.detach().clone() for k, v in base_model.state_dict().items()}
+                swa_count = 1
+            else:
+                for k, v in base_model.state_dict().items():
+                    swa_state[k].add_(v.detach())
+                swa_count += 1
 
         step += 1
         approx_training_time_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
@@ -1225,8 +1315,13 @@ def main() -> None:
     # -----------------------------
     # SERIALIZATION + ROUNDTRIP VALIDATION
     # -----------------------------
-    # Save the raw state (useful for debugging/loading in PyTorch directly), then always produce
-    # the compressed int8+zlib artifact and validate the round-tripped weights.
+    # Apply SWA averaged weights if available
+    if swa_state is not None and swa_count > 1:
+        log0(f"SWA: applying averaged weights from {swa_count} checkpoints")
+        for k in swa_state:
+            swa_state[k].div_(swa_count)
+        base_model.load_state_dict(swa_state, strict=True)
+        restore_low_dim_params_to_fp32(base_model)
 
     if master_process:
         torch.save(base_model.state_dict(), "final_model.pt")
@@ -1245,7 +1340,13 @@ def main() -> None:
     quant_buf = io.BytesIO()
     torch.save(quant_obj, quant_buf)
     quant_raw = quant_buf.getvalue()
-    quant_blob = zlib.compress(quant_raw, level=9)
+    if args.use_zstd and zstd_mod is not None:
+        cctx = zstd_mod.ZstdCompressor(level=args.zstd_level)
+        quant_blob = cctx.compress(quant_raw)
+        compress_label = f"int8+zstd{args.zstd_level}"
+    else:
+        quant_blob = zlib.compress(quant_raw, level=9)
+        compress_label = "int8+zlib"
     quant_raw_bytes = len(quant_raw)
     if master_process:
         with open("final_model.int8.ptz", "wb") as f:
@@ -1254,16 +1355,20 @@ def main() -> None:
         code_bytes = len(code.encode("utf-8"))
         ratio = quant_stats["baseline_tensor_bytes"] / max(quant_stats["int8_payload_bytes"], 1)
         log0(
-            f"Serialized model int8+zlib: {quant_file_bytes} bytes "
+            f"Serialized model {compress_label}: {quant_file_bytes} bytes "
             f"(payload:{quant_stats['int8_payload_bytes']} raw_torch:{quant_raw_bytes} payload_ratio:{ratio:.2f}x)"
         )
-        log0(f"Total submission size int8+zlib: {quant_file_bytes + code_bytes} bytes")
+        log0(f"Total submission size {compress_label}: {quant_file_bytes + code_bytes} bytes")
 
     if distributed:
         dist.barrier()
     with open("final_model.int8.ptz", "rb") as f:
         quant_blob_disk = f.read()
-    quant_state = torch.load(io.BytesIO(zlib.decompress(quant_blob_disk)), map_location="cpu")
+    if args.use_zstd and zstd_mod is not None:
+        dctx = zstd_mod.ZstdDecompressor()
+        quant_state = torch.load(io.BytesIO(dctx.decompress(quant_blob_disk)), map_location="cpu")
+    else:
+        quant_state = torch.load(io.BytesIO(zlib.decompress(quant_blob_disk)), map_location="cpu")
     base_model.load_state_dict(dequantize_state_dict_int8(quant_state), strict=True)
     torch.cuda.synchronize()
     t_qeval = time.perf_counter()
@@ -1287,6 +1392,8 @@ def main() -> None:
     log0(f"final_int8_zlib_roundtrip_exact val_loss:{q_val_loss:.8f} val_bpb:{q_val_bpb:.8f}")
 
     if args.eval_stride > 0:
+        if args.eval_ntk_alpha > 0:
+            set_ntk_alpha(base_model, args.eval_ntk_alpha)
         torch.cuda.synchronize()
         t_slide = time.perf_counter()
         sw_val_loss, sw_val_bpb = eval_val_sliding(
@@ -1297,9 +1404,12 @@ def main() -> None:
         log0(
             f"final_sliding_window val_loss:{sw_val_loss:.4f} val_bpb:{sw_val_bpb:.4f} "
             f"stride:{args.eval_stride} seq_len:{args.eval_seq_len if args.eval_seq_len > 0 else args.train_seq_len} "
+            f"ntk_alpha:{args.eval_ntk_alpha} "
             f"eval_time:{1000.0 * (time.perf_counter() - t_slide):.0f}ms"
         )
         log0(f"final_sliding_window_exact val_loss:{sw_val_loss:.8f} val_bpb:{sw_val_bpb:.8f}")
+        if args.eval_ntk_alpha > 0:
+            set_ntk_alpha(base_model, 0.0)
 
     if distributed:
         dist.destroy_process_group()
