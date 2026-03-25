@@ -1,6 +1,7 @@
 #!/bin/bash
+set -euo pipefail
 # H100 Baseline Execution (Int4 + Bayesian Cache)
-# Commit: b735e22
+# Commit: 6b44bc6
 
 # Hyperparameters can be overridden here or via env vars
 export RUN_ID=${RUN_ID:-main_cache_lzma_baseline}
