@@ -15,3 +15,4 @@ logs/
 colab_*.ipynb
 !colab_int6_gps_int4_mlp_train.ipynb
 !colab_int6_gps_int4_mlp_train_results.ipynb
+!colab_bayesian_backoff_cache_tt_adapter_launcher.ipynb
