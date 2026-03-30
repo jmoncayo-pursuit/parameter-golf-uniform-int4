@@ -25,19 +25,16 @@ Git branch: **`qat-int4-int6-gps-mlp`** — quantization-aware training, Int4 ML
 - **Eval-side cache feasibility is rule-based, not officially blessed.** The current reading of the README is that using already-graded tokens for backward-looking mixing is acceptable, but there is no explicit organizer ruling attached to this branch note.
 
 ## Current Evidence
-- **External measurement only:** a friend-run result reported `Post-EMA = 1.1193` at `13.8MB`.
-- That result is useful signal, but it is not yet backed by a committed artifact, log, or `records/` entry in this branch.
-- There are no local Runpod/H100 measurements committed here yet.
+- No official leaderboard submission from this branch.
+- No committed Runpod/H100 artifact, benchmark log, or `records/` entry for this stack yet.
 
 ## Not Yet Proven
-- Whether the external `1.1193 / 13.8MB` result is reproducible from this exact branch.
 - Whether the current cached sliding evaluation path fits comfortably inside the 10-minute evaluation budget on target hardware.
 - Whether current README-compatible cache usage matches organizer intent in a stricter ruling.
 
 ## Risks / Open Questions
-- **Reproducibility risk:** external numbers may depend on uncommitted launch details or environment differences.
 - **Runtime risk:** cached sliding evaluation may help BPB but still fail the wall-clock budget if not measured carefully.
-- **Artifact risk:** final compressed size is promising externally, but not yet confirmed in a local committed run.
+- **Artifact risk:** final compressed size under the 16MB constraint is not yet confirmed on target hardware in a committed run.
 
 ## Next Concrete Step
-Run and save one reproducible target-hardware baseline result from this branch, including artifact size, wall-clock, and `val_bpb`, so the branch stops depending on external testimony.
+Run and save one reproducible target-hardware baseline result from this branch, including artifact size, wall-clock, and `val_bpb`, under `records/` (or equivalent) so claims are grounded in logs.
