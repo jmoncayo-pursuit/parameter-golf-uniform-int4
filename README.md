@@ -7,14 +7,13 @@
 
 **Canonical home** of the **Uniform Int4@4.0** experiment.
 
-This repository is the dedicated, standalone home for the aggressive mixed-precision line originally developed in **`parameter-golf-qat-int4`** on branch **`qat-int4-int6-gps-mlp`**.
+This repository is the dedicated, standalone home for the **Uniform Int4@4.0** experiment.
 
 **Lineage**
-- Inherited and refined from **`parameter-golf-qat-int4 / qat-int4-int6-gps-mlp`**.
-- The core implementation was moved here to provide cleaner context isolation, operational clarity, and a single canonical experiment home.
-- This repo should be treated as the canonical place for proof runs, readiness work, and further refinement of that implementation line.
+- This repo is the canonical place for proof runs, readiness work, and refinement of the Uniform Int4@4.0 baseline.
+- Historical origin is tracked in the experiment note and readiness tracker instead of being repeated throughout the repo surface.
 
-Current focus: operational hardening, proof runs, and pushing the Int4@4.0 frontier without losing attribution to the originating branch.
+Current focus: operational hardening, proof runs, and pushing the Int4@4.0 frontier.
 
 **OpenAI Model Craft Challenge: Parameter Golf** is a challenge to train the best language model that fits in a 16MB artifact and trains in under 10 minutes on 8xH100s, evaluated by compression on the FineWeb validation set (tokenizer-agnostic, bits per byte).
 
@@ -48,40 +47,20 @@ The challenge runs from March 18th to April 30th.
 
 Happy training!
 
-## Leaderboard
+## Repo Surface
 
-| Run | Score | Author | Summary | Date | Info |
-|-----|------:|--------|---------|------|------|
-| 10L Int5-MLP + BigramHash(10240) | 1.1428 | thwu1 | 10 layers, mixed int5/int6 quantization, BigramHash(10240), SWA(0.4), WD=0.04 | 2026-03-20 | [info](records/track_10min_16mb/2026-03-20_10L_Int5MLP_MuonWD04_SWA50/README.md) |
-| Int6 MLP3x + SmearGate + BigramHash | 1.1458 | Raahil Shah | 3x MLP + SmearGate + BigramHash + OrthoInit + Muon WD + SWA | 2026-03-20 | [info](records/track_10min_16mb/2026-03-20_Int6_MLP3x_SmearGate_BigramHash_MuonWD_SWA/README.md) |
-| 11L MLP3x + Int6 QAT | 1.1502 | aruniyer | 11 layers, 3x MLP, int6 QAT, zstd-22, WD=0.04, sliding eval | 2026-03-20 | [info](records/track_10min_16mb/2026-03-19_MLP3x_QAT_Int6_SlidingWindow/README.md) |
-| SmearGate + OrthoInit + Muon WD | 1.1556 | aquariouseworkman | SmearGate + BigramHash + 3x MLP + int6 STE QAT + sliding eval | 2026-03-19 | [info](records/track_10min_16mb/2026-03-19_smeargate_orthoinit_muonwd/README.md) |
-| 10L Int6 QAT + Zstd MLP2.6x | 1.1586 | yahya010 | 10 layers, int6 QAT + zstd-22, MLP 1344, Muon 0.99, sliding eval | 2026-03-19 | [info](records/track_10min_16mb/2026-03-19_Seq2048_FP16Emb_TunedLR/README.md) |
-| Mixed Quant + Sliding Window Eval | 1.1630 | aquariouseworkman | Int6 block weights + int8 embeddings + 3x MLP + sliding eval | 2026-03-19 | [info](records/track_10min_16mb/2026-03-19_MixedQuant_Int6Int8_SlidingWindow/README.md) |
-| Muon WD + 10 layer | 1.1748 | notapplica | Includes prev. wins + Spectral embed init + resid mix | 2026-03-19 | [info](records/track_10min_16mb/2026-03-19_SlidingWindow_FP16Emb_10L_MuonWD_OvertoneInit/README.md) |
-| Sliding Window Eval | 1.1925 | Matthew Li | Sliding window evaluation at stride=64, increasing context for eval | 2026-03-19 | [info](records/track_10min_16mb/2026-03-19_SlidingWindowEval/README.md) |
-| Lora TTT | 1.1928 | samacqua | Test-time training with LORAs | 2026-03-19 | [info](records/track_10min_16mb/2026-03-17_LoRA_TTT/README.md) |
-| 4k seq length| 1.2014 | Spokane Way | 4k seq length + better hypers | 2026-03-19 | [info](records/track_10min_16mb/2026-03-19_TrainingOptSeq4096/README.md) |
-| 2048 seq length | 1.206 | Spokane Way | 2048 seq length (train + val) | 2026-03-18 | [info](records/track_10min_16mb/2026-03-18_LongContextSeq2048/README.md) |
-| int6 mixed precision | 1.2147 | Nan Liu | 10 layers, mixed int8/int6 | 2026-03-18 | [info](records/track_10min_16mb/2026-03-19_10L_MixedPrecision/README.md) |
-| fp16 Embed | 1.2197 | Renier Velazco | FP16 Tied Embedding + LR/Warmdown Tuning | 2026-03-18 | [info](records/track_10min_16mb/2026-03-18_FP16Embed_WD3600/README.md) |
-| Naive Baseline | 1.2244 | Baseline | 9layer 512dim 1024vocab TiedEmbeddings 4 KV heads | 2026-03-18 | [info](records/track_10min_16mb/2026-03-17_NaiveBaseline/README.md) |
+Canonical experiment note: **`architecture_notes/branch_notes/uniform-int4-baseline.md`**.
 
-#### Notable Non-Record Runs
+Canonical local entrypoints:
 
-| Run | Score | Author | Summary | Date | Info |
-|-----|------:|--------|---------|------|------|
-| 4-Hour Baseline | 1.2074 | Will DePue | Testing unlimited compute, 4 hours on 8xH100 | 2026-03-18 | [info](records/track_non_record_16mb/2026-03-18_Quasi10Bfrom50B_SP1024_9x512_KV4_4h_pgut3/README.md) |
+- `train_gpt.py`
+- `run_uniform_int4_baseline.sh`
+- `launch_h100.sh`
+- `preflight_h100.sh`
+- `colab_uniform_int4_runbook.ipynb`
+- `RUNPOD_PROOF_RUNBOOK.md`
 
-## Experimental Research & Probes
-
-Canonical experiment notes for Uniform Int4@4.0: **`architecture_notes/branch_notes/qat-int4-int6-gps-mlp-baseline.md`**.
-This repo is the canonical home; the originating implementation lineage was **`parameter-golf-qat-int4 -> qat-int4-int6-gps-mlp`**.
-
-Detailed technical experiments and research artifacts are now maintained in separate dedicated repositories to ensure the canonical submission remains baseline-focused:
-
-- [TurboQuant MSE Probe](https://github.com/jmoncayo-pursuit/turboquant-mse-probe): Validating rotational quantization efficiency.
-- **Eval-time cache + T3**: `BayesianBackoffCache` + optional `TestTimeAdapter`, documented in `architecture_notes/branch_notes/qat-int4-int6-gps-mlp-tt-adapter.md`. The canonical baseline entrypoint in this repo is **`run_uniform_int4_baseline.sh`**; the legacy launcher name **`run_qat_int4_int6_gps_mlp_baseline.sh`** is still kept as a compatibility alias.
+This standalone repo does not ship inherited results as proof evidence. Fresh proof artifacts should be created and saved under `records/`.
 
 ## Getting Started
 

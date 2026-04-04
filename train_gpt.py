@@ -8,9 +8,9 @@ import copy, glob, io, json, math, os, random, subprocess, sys, time, uuid, zlib
 from pathlib import Path
 try:
     import zstandard
-    _COMPRESSOR = os.environ.get("COMPRESSOR", "zstd")
+    _COMPRESSOR = os.environ.get("COMPRESSOR", "lzma")
 except ImportError:
-    _COMPRESSOR = os.environ.get("COMPRESSOR", "zlib")
+    _COMPRESSOR = os.environ.get("COMPRESSOR", "lzma")
 if _COMPRESSOR == "zstd":
     try: import zstandard
     except ImportError: raise ImportError("zstandard requested but not installed. Use COMPRESSOR=zlib or COMPRESSOR=lzma.")
@@ -216,10 +216,6 @@ def eval_val(
     val_loss = val_loss_sum / val_token_count
     bits_per_token = val_loss.item() / math.log(2.0)
     tokens_per_byte = val_token_count.item() / val_byte_count.item()
-    if os.environ.get('CHECKPOINT_ONLY') == '1':
-        torch.save(model.state_dict(), 'final_model.pt')
-        print('CHECKPOINT_ONLY: Saved and exiting.')
-        import sys; sys.exit(0)
     model.train()
     return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
 
@@ -772,8 +768,6 @@ class BayesianBackoffCache:
     """
     Backward-looking variable-order n-gram cache for eval-time mixing (no artifact change).
     Accumulates statistics from already-graded tokens during sliding window evaluation.
-    Candidate branch `qat-int4-int6-gps-mlp`; optional TestTimeAdapter (T3) on branch
-    `qat-int4-int6-gps-mlp-tt-adapter` — see architecture_notes/branch_notes/qat-int4-int6-gps-mlp-tt-adapter.md.
     """
     def __init__(self, vocab_size: int, max_order: int = 5, recency_decay: float = 0.999,
                  min_cache_count: float = 0.1, entropy_threshold: float = 0.2,
@@ -944,8 +938,7 @@ def eval_val_sliding_cached(
 ) -> tuple[float, float]:
     """
     Sliding eval with BayesianBackoffCache: mix model logits with cache when thresholds pass.
-    Uses only already-graded tokens for cache stats. Branch `qat-int4-int6-gps-mlp-tt-adapter`
-    adds TestTimeAdapter (T3) — see architecture_notes/branch_notes/qat-int4-int6-gps-mlp-tt-adapter.md.
+    Uses only already-graded tokens for cache stats.
     """
     cache = BayesianBackoffCache(vocab_size=args.vocab_size)
     seq_len = args.train_seq_len
@@ -1253,10 +1246,6 @@ def main() -> None:
     if args.warmup_steps > 0:
         initial_model_state = {name: tensor.detach().cpu().clone() for name, tensor in base_model.state_dict().items()}
         initial_optimizer_states = [copy.deepcopy(opt.state_dict()) for opt in optimizers]
-        if os.environ.get('CHECKPOINT_ONLY') == '1':
-            torch.save(model.state_dict(), 'final_model.pt')
-            print('CHECKPOINT_ONLY: Saved and exiting.')
-            import sys; sys.exit(0)
         model.train()
         for warmup_step in range(args.warmup_steps):
             zero_grad_all()
@@ -1425,11 +1414,18 @@ def main() -> None:
         log0(f"Code size: {code_bytes} bytes")
         log0(f"Total submission size: {model_bytes + code_bytes} bytes")
 
+    # CHECKPOINT_ONLY: save raw checkpoint and exit before expensive quantization + eval
+    if os.environ.get("CHECKPOINT_ONLY") == "1":
+        log0("checkpoint_only: exiting after final_model.pt (skipping quantization + roundtrip eval)")
+        if distributed:
+            dist.destroy_process_group()
+        return
+
     # Magnitude pruning: zero out smallest weights to improve compression
     with torch.no_grad():
         for name, param in base_model.named_parameters():
             if param.ndim == 2 and param.numel() > 65536:
-                threshold = torch.quantile(param.abs().float().flatten(), 0.03)
+                threshold = torch.quantile(param.abs().float().flatten(), 0.05)
                 mask = param.abs() < threshold
                 param.masked_fill_(mask, 0.0)
 
