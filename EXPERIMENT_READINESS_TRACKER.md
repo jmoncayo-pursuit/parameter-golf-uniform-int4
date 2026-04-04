@@ -17,7 +17,7 @@ Use [RUNPOD_PROOF_RUNBOOK.md](/Users/jmoncayopursuit.org/Desktop/parameter-golf-
 
 | Experiment Name | Canonical Location | Type | Readiness Status | Notes |
 |:---|:---|:---:|:---|:---|
-| Uniform Int4@4.0 | [parameter-golf-uniform-int4](/Users/jmoncayopursuit.org/Desktop/parameter-golf-uniform-int4) | Full Repo | Operational Scaffolding Applied, Proof Pending | Canonical standalone home. Exact-step default, validation cap support, phase markers, summaries, preflight, launch script, and clean runbook are in place; fresh proof evidence still needs to be saved under `records/`. |
+| Uniform Int4@4.0 | [parameter-golf-uniform-int4](/Users/jmoncayopursuit.org/Desktop/parameter-golf-uniform-int4) | Full Repo | Colab Proof Complete | 700-step T4 proof: roundtrip BPB=1.8008, artifact=15.93MB (under 16MB ✅), exit code 0. Evidence saved under `records/colab_700_step_proof/`. H100 proof still pending. |
 
 ## How to use this
 
