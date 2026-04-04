@@ -1,9 +1,16 @@
-# QAT Int4 + Int6 GPS + MLP candidate
+# Uniform Int4@4.0
 
-Git branch: **`qat-int4-int6-gps-mlp`** — quantization-aware training, Int4 MLP blocks, Int6 attention (GPS-style slots), mixed-precision export.
+This file describes the canonical baseline stack for **Uniform Int4@4.0** in **`parameter-golf-uniform-int4`**.
+Legacy lineage note: this stack originated on branch **`qat-int4-int6-gps-mlp`**.
+
+## Lineage And Attribution
+- Originating implementation line: **`parameter-golf-qat-int4 -> qat-int4-int6-gps-mlp`**.
+- This standalone repo does **not** claim the idea appeared from scratch here.
+- The purpose of **`parameter-golf-uniform-int4`** is to give that implementation line a clean canonical home for proof, readiness, and continued iteration.
+- Future improvements in this repo should be described as refinements of that line unless they materially change the experiment itself.
 
 ## Purpose
-- Canonical candidate branch for the current Parameter Golf submission line.
+- Canonical standalone experiment home for the current Parameter Golf submission line.
 - Holds the mixed-precision training/export pipeline we would actually want to reproduce on target hardware.
 - Exists to answer "does the current candidate really run and score as expected on challenge hardware?"
 

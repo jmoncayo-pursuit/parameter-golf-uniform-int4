@@ -3,6 +3,19 @@
 <br>
 <br>
 
+# parameter-golf-uniform-int4
+
+**Canonical home** of the **Uniform Int4@4.0** experiment.
+
+This repository is the dedicated, standalone home for the aggressive mixed-precision line originally developed in **`parameter-golf-qat-int4`** on branch **`qat-int4-int6-gps-mlp`**.
+
+**Lineage**
+- Inherited and refined from **`parameter-golf-qat-int4 / qat-int4-int6-gps-mlp`**.
+- The core implementation was moved here to provide cleaner context isolation, operational clarity, and a single canonical experiment home.
+- This repo should be treated as the canonical place for proof runs, readiness work, and further refinement of that implementation line.
+
+Current focus: operational hardening, proof runs, and pushing the Int4@4.0 frontier without losing attribution to the originating branch.
+
 **OpenAI Model Craft Challenge: Parameter Golf** is a challenge to train the best language model that fits in a 16MB artifact and trains in under 10 minutes on 8xH100s, evaluated by compression on the FineWeb validation set (tokenizer-agnostic, bits per byte).
 
 This challenge is heavily inspired by the [NanoGPT Speedrunning](https://github.com/KellerJordan/modded-nanogpt) challenge, where participants compete to train a model that reaches 3.28 FineWeb validation loss as quickly as possible. We're excited to see how optimizing for a parameter-constrained setting pushes people toward unique architectures (test-time compute, aggressive parameter tying, depth recurrence, low-rank training, ...), compression schemes (low precision, QAT, bitnets, novel tokenizers, ...), and other creative submissions (test-time training, long context, megakernels ...). 
@@ -62,12 +75,13 @@ Happy training!
 
 ## Experimental Research & Probes
 
-Candidate stack notes for this fork: **`architecture_notes/branch_notes/qat-int4-int6-gps-mlp-baseline.md`** (default git branch **`qat-int4-int6-gps-mlp`**).
+Canonical experiment notes for Uniform Int4@4.0: **`architecture_notes/branch_notes/qat-int4-int6-gps-mlp-baseline.md`**.
+This repo is the canonical home; the originating implementation lineage was **`parameter-golf-qat-int4 -> qat-int4-int6-gps-mlp`**.
 
 Detailed technical experiments and research artifacts are now maintained in separate dedicated repositories to ensure the canonical submission remains baseline-focused:
 
 - [TurboQuant MSE Probe](https://github.com/jmoncayo-pursuit/turboquant-mse-probe): Validating rotational quantization efficiency.
-- **Eval-time cache + T3** (same repo [`parameter-golf-qat-int4`](https://github.com/jmoncayo-pursuit/parameter-golf-qat-int4), branch **`qat-int4-int6-gps-mlp-tt-adapter`**): **`BayesianBackoffCache`** + optional **`TestTimeAdapter`** — `architecture_notes/branch_notes/qat-int4-int6-gps-mlp-tt-adapter.md`. **Baseline** training/eval: **`run_qat_int4_int6_gps_mlp_baseline.sh`**. **TT-adapter branch** also includes **`run_qat_int4_int6_gps_mlp_tt_adapter.sh`**.
+- **Eval-time cache + T3**: `BayesianBackoffCache` + optional `TestTimeAdapter`, documented in `architecture_notes/branch_notes/qat-int4-int6-gps-mlp-tt-adapter.md`. The canonical baseline entrypoint in this repo is **`run_uniform_int4_baseline.sh`**; the legacy launcher name **`run_qat_int4_int6_gps_mlp_baseline.sh`** is still kept as a compatibility alias.
 
 ## Getting Started
 
@@ -150,9 +164,13 @@ VOCAB_SIZE=1024 \
 torchrun --standalone --nproc_per_node=1 train_gpt.py
 ```
 
-By default, `train_gpt.py` keeps its ~10 minute wallclock cap. If you want a longer run, override it explicitly, for example `MAX_WALLCLOCK_SECONDS=0`.
+By default, `train_gpt.py` now uses exact-step behavior with `MAX_WALLCLOCK_SECONDS=0`. If you want a time-boxed run, opt into it explicitly, for example `MAX_WALLCLOCK_SECONDS=600`.
 
-By default, this command prints `train_loss` step logs during training and prints `val_loss`, `val_bpb`, and compressed model size in the final `final_int8_zlib_roundtrip` lines at the end. If you want periodic validation logs during the run, set `VAL_LOSS_EVERY`, for example `VAL_LOSS_EVERY=200`. For the baseline config, the final `val_bpb` should land around ~1.2 with a compressed model size under 16MB.
+For cheap proof runs, set `VAL_MAX_TOKENS` to cap validation work without changing the training idea, for example `VAL_MAX_TOKENS=262144`.
+
+At the end of a proof run, the trainer emits phase markers (`phase:training_complete`, `phase:serialization_start`, `phase:quantization_start`, `phase:roundtrip_eval_start`, `phase:done`) and writes `final_summary.json` plus `final_summary.md` alongside `final_model.pt` and `final_model.mixed.ptz`.
+
+For RunPod operational readiness, prefer [launch_h100.sh](./launch_h100.sh), [preflight_h100.sh](./preflight_h100.sh), [RUNPOD_PROOF_RUNBOOK.md](./RUNPOD_PROOF_RUNBOOK.md), and [run_uniform_int4_baseline.sh](./run_uniform_int4_baseline.sh).
 
 For dataset export, tokenizer export, and docs-cache rebuild instructions, see [data/README.md](data/README.md).
 

@@ -4,7 +4,7 @@ The `train_gpt.py` and `train_gpt_mlx.py` scripts are intended as good launching
 Hard stop: To keep readable for newcomers, let's make sure `train_gpt.py` and `train_gpt_mlx.py` never are longer than 1500 lines.
 """
 
-import copy, glob, io, math, os, random, subprocess, sys, time, uuid, zlib
+import copy, glob, io, json, math, os, random, subprocess, sys, time, uuid, zlib
 from pathlib import Path
 try:
     import zstandard
@@ -30,9 +30,9 @@ class Hyperparameters:
     tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_1024_bpe.model")
     run_id, seed = os.environ.get("RUN_ID", str(uuid.uuid4())), int(os.environ.get("SEED", 42))
     def e(k, v, t): return t(os.environ.get(k, v))
-    val_batch_size, val_loss_every, train_log_every = e("VAL_BATCH_SIZE", 524288, int), e("VAL_LOSS_EVERY", 500, int), e("TRAIN_LOG_EVERY", 100, int)
+    val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 524288, int), e("VAL_LOSS_EVERY", 500, int), e("VAL_MAX_TOKENS", 0, int), e("TRAIN_LOG_EVERY", 100, int)
     iterations, warmdown_iters, warmup_steps = e("ITERATIONS", 20000, int), e("WARMDOWN_ITERS", 3000, int), e("WARMUP_STEPS", 20, int)
-    train_batch_tokens, train_seq_len, max_wallclock_seconds = e("TRAIN_BATCH_TOKENS", 786432, int), e("TRAIN_SEQ_LEN", 2048, int), e("MAX_WALLCLOCK_SECONDS", 600.0, float)
+    train_batch_tokens, train_seq_len, max_wallclock_seconds = e("TRAIN_BATCH_TOKENS", 786432, int), e("TRAIN_SEQ_LEN", 2048, int), e("MAX_WALLCLOCK_SECONDS", 0.0, float)
     qk_gain_init, vocab_size, num_layers, num_kv_heads = e("QK_GAIN_INIT", 1.5, float), e("VOCAB_SIZE", 1024, int), e("NUM_LAYERS", 10, int), e("NUM_KV_HEADS", 4, int)
     model_dim, num_heads, mlp_mult, tie_embeddings = e("MODEL_DIM", 512, int), e("NUM_HEADS", 8, int), e("MLP_MULT", 4.0, float), bool(int(os.environ.get("TIE_EMBEDDINGS", 1)))
     rope_base, logit_softcap = e("ROPE_BASE", 10000.0, float), e("LOGIT_SOFTCAP", 30.0, float)
@@ -1125,12 +1125,17 @@ def main() -> None:
     dataset_dir = Path(args.data_path).resolve()
     actual_train_files = len(list(dataset_dir.glob("fineweb_train_*.bin")))
     val_tokens = load_validation_tokens(args.val_files, args.train_seq_len)
+    if args.val_max_tokens > 0:
+        capped_tokens = min(val_tokens.numel(), args.val_max_tokens + 1)
+        val_tokens = val_tokens[:capped_tokens]
     base_bytes_lut, has_leading_space_lut, is_boundary_token_lut = build_sentencepiece_luts(
         sp, args.vocab_size, device
     )
     log0(f"val_bpb:enabled tokenizer_kind=sentencepiece tokenizer_path={args.tokenizer_path}")
     log0(f"train_loader:dataset:{dataset_dir.name} train_shards:{actual_train_files}")
     log0(f"val_loader:shards pattern={args.val_files} tokens:{val_tokens.numel() - 1}")
+    if args.val_max_tokens > 0:
+        log0(f"val_loader:max_tokens_cap:{args.val_max_tokens}")
 
     # MODEL + OPTIMIZER SETUP
     base_model = GPT(
@@ -1387,6 +1392,12 @@ def main() -> None:
             stop_after_step = step
 
     
+    log0(
+        f"phase:training_complete steps:{step}/{args.iterations} "
+        f"stopped_early:{'yes' if step < args.iterations else 'no'} "
+        f"train_time_ms:{training_time_ms:.0f}"
+    )
+
     mem_alloc = torch.cuda.max_memory_allocated() // 1024 // 1024 if device.type == "cuda" else 0
     mem_res = torch.cuda.max_memory_reserved() // 1024 // 1024 if device.type == "cuda" else 0
     log0(
@@ -1406,6 +1417,7 @@ def main() -> None:
 
     # SERIALIZATION + ROUNDTRIP VALIDATION
     if master_process:
+        log0("phase:serialization_start writing final_model.pt")
         torch.save(base_model.state_dict(), "final_model.pt")
         model_bytes = os.path.getsize("final_model.pt")
         code_bytes = len(code.encode("utf-8"))
@@ -1422,6 +1434,8 @@ def main() -> None:
                 param.masked_fill_(mask, 0.0)
 
     # INT6 mixed quantization + zstd/zlib export
+    if master_process:
+        log0(f"phase:quantization_start building mixed_int6_int4_{_COMPRESSOR} artifact")
     sd_cpu = {k: v.detach().cpu() for k, v in base_model.state_dict().items()}
     quant_result, quant_meta = mixed_quantize_int6(sd_cpu, {"mlp", "attn", "bigram"})
     quant_buf = io.BytesIO()
@@ -1441,12 +1455,14 @@ def main() -> None:
         code_bytes = len(code.encode("utf-8"))
         log0(f"Serialized model mixed_int6_int4_{_COMPRESSOR}: {quant_file_bytes} bytes")
         log0(f"Code size (train_gpt.py): {code_bytes} bytes")
-        log0(f"Total submission size mixed_int6_int4_{_COMPRESSOR}: {quant_file_bytes + code_bytes} bytes")
-        if quant_file_bytes + code_bytes > 16_000_000:
-            raise RuntimeError(f"FATAL: Artifact size {quant_file_bytes + code_bytes} exceeds 16MB limit!")
+        total_submission_bytes = quant_file_bytes + code_bytes
+        log0(f"Total submission size mixed_int6_int4_{_COMPRESSOR}: {total_submission_bytes} bytes")
+        if total_submission_bytes > 16_000_000:
+            raise RuntimeError(f"FATAL: Artifact size {total_submission_bytes} exceeds 16MB limit!")
 
     if distributed:
         dist.barrier()
+    log0("phase:roundtrip_eval_start loading quantized artifact and running final validation")
     with open("final_model.mixed.ptz", "rb") as f:
         quant_blob_disk = f.read()
     if _COMPRESSOR == "zstd":
@@ -1491,6 +1507,57 @@ def main() -> None:
         f"eval_time:{1000.0 * (time.perf_counter() - t_qeval):.0f}ms"
     )
     log0(f"final_mixed_int6_int4_{_COMPRESSOR}_roundtrip_exact val_loss:{q_val_loss:.8f} val_bpb:{q_val_bpb:.8f}")
+    if master_process:
+        summary = {
+            "run_id": args.run_id,
+            "experiment_name": "Uniform Int4@4.0",
+            "repo_name": "parameter-golf-uniform-int4",
+            "steps_completed": step,
+            "iterations_requested": args.iterations,
+            "stopped_early": step < args.iterations,
+            "max_wallclock_seconds": args.max_wallclock_seconds,
+            "world_size": world_size,
+            "grad_accum_steps": grad_accum_steps,
+            "train_batch_tokens": args.train_batch_tokens,
+            "train_seq_len": args.train_seq_len,
+            "val_max_tokens": args.val_max_tokens,
+            "train_time_ms": training_time_ms,
+            "final_model_pt_bytes": model_bytes if "model_bytes" in locals() else 0,
+            "final_model_mixed_ptz_bytes": quant_file_bytes if "quant_file_bytes" in locals() else 0,
+            "train_gpt_py_bytes": len(code.encode("utf-8")),
+            "total_submission_bytes": total_submission_bytes if "total_submission_bytes" in locals() else 0,
+            "submission_limit_bytes": 16_000_000,
+            "submission_limit_ok": (total_submission_bytes if "total_submission_bytes" in locals() else 0) <= 16_000_000,
+            "roundtrip_val_loss": float(q_val_loss),
+            "roundtrip_val_bpb": float(q_val_bpb),
+            "artifact_path_proven": True,
+            "final_model_pt_path": str(Path("final_model.pt").resolve()),
+            "final_model_mixed_ptz_path": str(Path("final_model.mixed.ptz").resolve()),
+        }
+        Path("final_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        Path("final_summary.md").write_text(
+            "\n".join(
+                [
+                    f"# Run Summary: {args.run_id}",
+                    "",
+                    f"- Experiment: Uniform Int4@4.0",
+                    f"- Repo: parameter-golf-uniform-int4",
+                    f"- Steps: {step}/{args.iterations}",
+                    f"- Stopped early: {'yes' if step < args.iterations else 'no'}",
+                    f"- Total submission size: {summary['total_submission_bytes']} bytes",
+                    f"- Limit check: {'PASS' if summary['submission_limit_ok'] else 'FAIL'}",
+                    f"- `final_model.pt`: {summary['final_model_pt_bytes']} bytes",
+                    f"- `final_model.mixed.ptz`: {summary['final_model_mixed_ptz_bytes']} bytes",
+                    f"- `train_gpt.py`: {summary['train_gpt_py_bytes']} bytes",
+                    f"- Roundtrip val_loss: {float(q_val_loss):.8f}",
+                    f"- Roundtrip val_bpb: {float(q_val_bpb):.8f}",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        log0("Wrote final_summary.json and final_summary.md")
+    log0("phase:done")
 
     if distributed:
         dist.destroy_process_group()
