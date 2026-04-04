@@ -1,0 +1,16 @@
+{
+  "total_steps": 700,
+  "train_loss": 3.1889,
+  "val_loss": 3.0707,
+  "val_bpb": 1.8156,
+  "roundtrip_val_loss": 3.0443,
+  "roundtrip_val_bpb": 1.8008,
+  "final_model_mixed_ptz_bytes": 15859108,
+  "train_gpt_py_bytes": 72149,
+  "total_submission_size_mixed_int6_int4_lzma": 15931257,
+  "compressor": "lzma",
+  "pruning_threshold": 0.05,
+  "phase_markers_found": true,
+  "exit_code": 0,
+  "under_16mb": true
+}
