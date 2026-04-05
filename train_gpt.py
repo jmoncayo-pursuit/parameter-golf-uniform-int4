@@ -327,7 +327,7 @@ def mixed_quantize_int6(state_dict: dict[str, Tensor], int6_cats: set[str]):
             continue
         if cat in int6_cats and t.ndim >= 1:
             clip = 7 if cat == "mlp" else 31  # Int4 for MLP, Int6 for attention
-            block_size = 128
+            block_size = 256 if cat == "mlp" else 128
             q, s = quantize_intN_blocked(t, clip_range=clip, block_size=block_size)
             
             if cat == "mlp":
@@ -1425,7 +1425,8 @@ def main() -> None:
     with torch.no_grad():
         for name, param in base_model.named_parameters():
             if param.ndim == 2 and param.numel() > 65536:
-                threshold = torch.quantile(param.abs().float().flatten(), 0.05)
+                # Increased to 8% to hit 16MB decimal/binary safer
+                threshold = torch.quantile(param.abs().float().flatten(), 0.08)
                 mask = param.abs() < threshold
                 param.masked_fill_(mask, 0.0)
 
@@ -1440,7 +1441,7 @@ def main() -> None:
     if _COMPRESSOR == "zstd":
         quant_blob = zstandard.ZstdCompressor(level=22).compress(quant_raw)
     elif _COMPRESSOR == "lzma":
-        quant_blob = _lzma_mod.compress(quant_raw, preset=6)
+        quant_blob = _lzma_mod.compress(quant_raw, preset=9)
     else:
         quant_blob = zlib.compress(quant_raw, 9)
     if master_process:
@@ -1452,9 +1453,12 @@ def main() -> None:
         log0(f"Serialized model mixed_int6_int4_{_COMPRESSOR}: {quant_file_bytes} bytes")
         log0(f"Code size (train_gpt.py): {code_bytes} bytes")
         total_submission_bytes = quant_file_bytes + code_bytes
-        log0(f"Total submission size mixed_int6_int4_{_COMPRESSOR}: {total_submission_bytes} bytes")
-        if total_submission_bytes > 16_000_000:
-            raise RuntimeError(f"FATAL: Artifact size {total_submission_bytes} exceeds 16MB limit!")
+        log0(f"Total submission size: {total_submission_bytes} bytes")
+        
+        # 16 MiB = 16 * 1024 * 1024 = 16,777,216 bytes
+        limit_bytes = 16 * 1024 * 1024
+        if total_submission_bytes > limit_bytes:
+            raise RuntimeError(f"FATAL: Artifact size {total_submission_bytes} exceeds 16MiB limit ({limit_bytes} bytes)!")
 
     if distributed:
         dist.barrier()
