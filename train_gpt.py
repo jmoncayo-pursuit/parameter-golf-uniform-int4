@@ -32,7 +32,7 @@ class Hyperparameters:
     def e(k, v, t): return t(os.environ.get(k, v))
     val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 524288, int), e("VAL_LOSS_EVERY", 500, int), e("VAL_MAX_TOKENS", 0, int), e("TRAIN_LOG_EVERY", 100, int)
     iterations, warmdown_iters, warmup_steps = e("ITERATIONS", 20000, int), e("WARMDOWN_ITERS", 3000, int), e("WARMUP_STEPS", 20, int)
-    train_batch_tokens, train_seq_len, max_wallclock_seconds = e("TRAIN_BATCH_TOKENS", 786432, int), e("TRAIN_SEQ_LEN", 2048, int), e("MAX_WALLCLOCK_SECONDS", 0.0, float)
+    train_batch_tokens, train_seq_len, max_wallclock_seconds = e("TRAIN_BATCH_TOKENS", 262144, int), e("TRAIN_SEQ_LEN", 1024, int), e("MAX_WALLCLOCK_SECONDS", 0.0, float)
     qk_gain_init, vocab_size, num_layers, num_kv_heads = e("QK_GAIN_INIT", 1.5, float), e("VOCAB_SIZE", 1024, int), e("NUM_LAYERS", 10, int), e("NUM_KV_HEADS", 4, int)
     model_dim, num_heads, mlp_mult, tie_embeddings = e("MODEL_DIM", 512, int), e("NUM_HEADS", 8, int), e("MLP_MULT", 4.0, float), bool(int(os.environ.get("TIE_EMBEDDINGS", 1)))
     rope_base, logit_softcap = e("ROPE_BASE", 10000.0, float), e("LOGIT_SOFTCAP", 30.0, float)
@@ -98,11 +98,11 @@ class Muon(torch.optim.Optimizer):
                     g = p.grad
                     state = self.state[p]
                     if "momentum_buffer" not in state:
-                        state["momentum_buffer"] = torch.zeros_like(g)
+                       state["momentum_buffer"] = torch.zeros_like(g)
                     buf = state["momentum_buffer"]
                     buf.mul_(momentum).add_(g)
                     if nesterov:
-                        g = g.add(buf, alpha=momentum)
+                       g = g.add(buf, alpha=momentum)
                     g = zeropower_via_newtonschulz5(g, steps=backend_steps)
                     g *= max(1, g.size(0) / g.size(1)) ** 0.5
                     updates_flat[curr : curr + p.numel()] = g.reshape(-1)
@@ -333,7 +333,7 @@ def mixed_quantize_int6(state_dict: dict[str, Tensor], int6_cats: set[str]):
             if cat == "mlp":
                 q_offset = (q + 8).to(torch.uint8)
                 if q_offset.shape[-1] % 2 != 0:
-                     q_offset = F.pad(q_offset, (0, 1))
+                    q_offset = F.pad(q_offset, (0, 1))
                 packed_uint8 = (q_offset[..., 0::2] << 4) | (q_offset[..., 1::2] & 0x0F)
                 result[name + ".q"] = packed_uint8
                 result[name + ".scale"] = s
@@ -350,7 +350,7 @@ def mixed_quantize_int6(state_dict: dict[str, Tensor], int6_cats: set[str]):
     return result, meta
 
 def dequantize_mixed_int6(result: dict[str, Tensor], meta: dict[str, object],
-                          template_sd: dict[str, Tensor]) -> dict[str, Tensor]:
+                         template_sd: dict[str, Tensor]) -> dict[str, Tensor]:
     out: dict[str, Tensor] = {}
     for name, orig in template_sd.items():
         info = meta[name]
@@ -384,12 +384,12 @@ def dequantize_mixed_int6(result: dict[str, Tensor], meta: dict[str, object],
         else:
             if s.ndim > 0:
                 if isinstance(info, dict) and "block_size" in info:
-                     block_size = info["block_size"]
-                     orig_shape = orig.shape
-                     q_blocked = q.contiguous().view(-1, block_size)
-                     out[name] = (q_blocked.float() * s.float()[:, None]).view(orig_shape).to(orig_dtype)
+                    block_size = info["block_size"]
+                    orig_shape = orig.shape
+                    q_blocked = q.contiguous().view(-1, block_size)
+                    out[name] = (q_blocked.float() * s.float()[:, None]).view(orig_shape).to(orig_dtype)
                 else:
-                     out[name] = (q.float() * s.float().view(q.shape[0], *([1] * (q.ndim - 1)))).to(orig_dtype)
+                    out[name] = (q.float() * s.float().view(q.shape[0], *([1] * (q.ndim - 1)))).to(orig_dtype)
             else:
                 out[name] = (q.float() * float(s.item())).to(orig_dtype)
     return out
@@ -712,8 +712,8 @@ class GPT(nn.Module):
                 elif module.weight.ndim == 2 and module.weight.shape[0] >= 64 and module.weight.shape[1] >= 64:
                     nn.init.orthogonal_(module.weight, gain=1.0)
                     if ".proj." in name or name.endswith(".proj"):
-                        with torch.no_grad():
-                            module.weight.mul_(1.0 / math.sqrt(2 * num_layers))
+                       with torch.no_grad():
+                           module.weight.mul_(1.0 / math.sqrt(2 * num_layers))
 
     def forward(self, input_ids: Tensor, target_ids: Tensor) -> Tensor:
         x = self.tok_emb(input_ids)
@@ -862,7 +862,7 @@ def eval_val_sliding(
     seq_len = args.train_seq_len
     total_tokens = val_tokens.numel() - 1
     window_starts = [ws for ws in range(0, total_tokens, stride)
-                     if min(ws + seq_len, total_tokens) - ws >= stride or ws == 0]
+                    if min(ws + seq_len, total_tokens) - ws >= stride or ws == 0]
     total_windows = len(window_starts)
     my_s = (total_windows * rank) // world_size
     my_e = (total_windows * (rank + 1)) // world_size
@@ -944,7 +944,7 @@ def eval_val_sliding_cached(
     seq_len = args.train_seq_len
     total_tokens = val_tokens.numel() - 1
     window_starts = [ws for ws in range(0, total_tokens, stride)
-                     if min(ws + seq_len, total_tokens) - ws >= stride or ws == 0]
+                    if min(ws + seq_len, total_tokens) - ws >= stride or ws == 0]
     total_windows = len(window_starts)
     my_s = (total_windows * rank) // world_size
     my_e = (total_windows * (rank + 1)) // world_size
@@ -986,9 +986,9 @@ def eval_val_sliding_cached(
                     # Cache observation is backward-looking: at j, cache knows [0...j-1]
                     # The predictor uses cache.mix_with_model()
                     if j < s:
-                        # Just update history/cache, no scoring
-                        cache.observe(y_batch[i, j].item(), global_position=ws + j)
-                        continue
+                       # Just update history/cache, no scoring
+                       cache.observe(y_batch[i, j].item(), global_position=ws + j)
+                       continue
                     
                     # Prediction at j using tokens [0...j-1]
                     target_id = y_batch[i, j].item()

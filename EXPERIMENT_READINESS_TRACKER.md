@@ -17,7 +17,7 @@ Use [RUNPOD_PROOF_RUNBOOK.md](/Users/jmoncayopursuit.org/Desktop/parameter-golf-
 
 | Experiment Name | Canonical Location | Type | Readiness Status | Notes |
 |:---|:---|:---:|:---|:---|
-| Uniform Int4@4.0 | [parameter-golf-uniform-int4](/Users/jmoncayopursuit.org/Desktop/parameter-golf-uniform-int4) | Full Repo | Colab Proof Complete | 700-step T4 proof: roundtrip BPB=1.8008, artifact=15.93MB (under 16MB ✅), exit code 0. Evidence saved under `records/colab_700_step_proof/`. H100 proof still pending. |
+| Uniform Int4@4.0 | [parameter-golf-uniform-int4](/Users/jmoncayopursuit.org/Desktop/parameter-golf-uniform-int4) | Full Repo | Ready for 3,000-step Signal Run | 700-step proof passed. Settings finalized (3k steps, 262k tokens, 1024 seq_len, lzma) in `uniform_int4_kaggle_runbook.ipynb`. Indentation errors in `train_gpt.py` fixed. |
 
 ## How to use this
 
