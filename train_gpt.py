@@ -374,20 +374,22 @@ def dequantize_mixed_int6(result: dict[str, Tensor], meta: dict[str, object],
             unpacked_q = torch.empty(*q.shape[:-1], q.shape[-1] * 2, dtype=torch.int8)
             unpacked_q[..., 0::2] = high_nibble
             unpacked_q[..., 1::2] = low_nibble
-            q = unpacked_q[..., :orig_shape[-1]]
             
-            if s.ndim > 0:
-                q_blocked = q.contiguous().view(-1, block_size)
-                out[name] = (q_blocked.float() * s.float()[:, None]).view(orig_shape).to(orig_dtype)
-            else:
-                out[name] = (q.float() * float(s.item())).to(orig_dtype)
+            # Pad and dequantize
+            q_full = unpacked_q[..., :((orig_shape[-1] + block_size - 1) // block_size * block_size)]
+            q_blocked = q_full.contiguous().view(-1, block_size)
+            dq = (q_blocked.float() * s.float()[:, None]).view(orig_shape[0], -1)
+            out[name] = dq[:, :orig_shape[1]].to(orig_dtype)
         else:
             if s.ndim > 0:
                 if isinstance(info, dict) and "block_size" in info:
                     block_size = info["block_size"]
                     orig_shape = orig.shape
-                    q_blocked = q.contiguous().view(-1, block_size)
-                    out[name] = (q_blocked.float() * s.float()[:, None]).view(orig_shape).to(orig_dtype)
+                    pad_len = (block_size - (orig_shape[1] % block_size)) % block_size
+                    q_padded = F.pad(q.float(), (0, pad_len)) if pad_len > 0 else q.float()
+                    q_blocked = q_padded.view(-1, block_size)
+                    dq = (q_blocked * s.float()[:, None]).view(orig_shape[0], -1)
+                    out[name] = dq[:, :orig_shape[1]].to(orig_dtype)
                 else:
                     out[name] = (q.float() * s.float().view(q.shape[0], *([1] * (q.ndim - 1)))).to(orig_dtype)
             else:
@@ -475,6 +477,7 @@ class RMSNorm(nn.Module):
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
 
 
+# EVOLVE: qat_ramp_START
 def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):
     is_qat = (step >= qat_start_step)
     alpha = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
@@ -491,6 +494,7 @@ def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=1
     q_res = (q_ste * s_v).view_as(w_p_o)
     q_final = q_res[:, :orig_shape[1]] if pad_len > 0 else q_res
     return torch.where(is_qat, q_final, w)
+# EVOLVE: qat_ramp_END
 
 class CastedLinear(nn.Linear):
     def __init__(self, in_features: int, out_features: int, bias: bool = True,
@@ -1421,6 +1425,7 @@ def main() -> None:
             dist.destroy_process_group()
         return
 
+    # EVOLVE: pruning_START
     # Magnitude pruning: zero out smallest weights to improve compression
     with torch.no_grad():
         for name, param in base_model.named_parameters():
@@ -1429,6 +1434,7 @@ def main() -> None:
                 threshold = torch.quantile(param.abs().float().flatten(), 0.065)
                 mask = param.abs() < threshold
                 param.masked_fill_(mask, 0.0)
+    # EVOLVE: pruning_END
 
     # INT6 mixed quantization + zstd/zlib export
     if master_process:
