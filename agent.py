@@ -21,7 +21,7 @@ class AgentClass:
     """Sets up the ADK application."""
     root_agent = llm_agent.LlmAgent(
       name='ParameterGolfEvolver',
-      model='gemini-3-pro-preview',
+      model='gemini-3.1-pro-preview',
       description=(
           'Delegated to when analyzing model training leaderboards, evaluating evolutionary JSON metric results, or generating new PyTorch codebase mutations to optimize bits-per-byte (BPB). Routes here when the user explicitly requests to "evolve" code, analyze past generation matrices, or write optimal Tensor math.'
       ),
