@@ -17,12 +17,28 @@
     "gen": 1,
     "parent_gen": null,
     "target": "qat_ramp",
-    "variants": []
-  },
-  {
-    "gen": 1,
-    "parent_gen": null,
-    "target": "qat_ramp",
-    "variants": []
+    "variants": [
+      {
+        "trial": 0,
+        "score": 66781.06168006305,
+        "bpb": 2.054303147202522,
+        "size": 15423483,
+        "code": "def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):\n    is_qat = (step >= qat_start_step)\n    ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)\n    alpha = ratio\n    current_clip = 127 - alpha * (127 - clip_range)\n    orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size\n    with torch.no_grad():\n        w_p = F.pad(w.float(), (0, pad_len))\n        b_max = w_p.view(-1, block_size).abs().amax(dim=1)\n        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)\n    w_p_o = F.pad(w, (0, pad_len))\n    s_v = s.float().view(-1, 1)\n    w_p_s_v = w_p_o.view(-1, block_size) / s_v\n    q_ste = w_p_s_v - w_p_s_v.detach() + torch.round(w_p_s_v.clamp(-(current_clip+1), current_clip)).detach()\n    q_res = (q_ste * s_v).view_as(w_p_o)\n    q_final = q_res[:, :orig_shape[1]] if pad_len > 0 else q_res\n    return torch.where(is_qat, q_final, w)"
+      },
+      {
+        "trial": 1,
+        "score": 66776.1825208903,
+        "bpb": 2.054074580835612,
+        "size": 15424318,
+        "code": "def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):\n    is_qat = (step >= qat_start_step)\n    ratio = torch.clamp((step.float() - qat_start_step.float()) / 1500.0, 0.0, 1.0)\n    alpha = 0.5 * (1.0 - torch.cos(ratio * math.pi))\n    current_clip = 127 - alpha * (127 - clip_range)\n    orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size\n    with torch.no_grad():\n        w_p = F.pad(w.float(), (0, pad_len))\n        b_max = w_p.view(-1, block_size).abs().amax(dim=1)\n        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)\n    w_p_o = F.pad(w, (0, pad_len))\n    s_v = s.float().view(-1, 1)\n    w_p_s_v = w_p_o.view(-1, block_size) / s_v\n    q_ste = w_p_s_v - w_p_s_v.detach() + torch.round(w_p_s_v.clamp(-(current_clip+1), current_clip)).detach()\n    q_res = (q_ste * s_v).view_as(w_p_o)\n    q_final = q_res[:, :orig_shape[1]] if pad_len > 0 else q_res\n    return torch.where(is_qat, q_final, w)"
+      },
+      {
+        "trial": 2,
+        "score": 66773.30311451023,
+        "bpb": 2.0539598845804092,
+        "size": 15424306,
+        "code": "def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):\n    is_qat = (step >= qat_start_step)\n    ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)\n    alpha = ratio ** 2.0\n    current_clip = 127 - alpha * (127 - clip_range)\n    orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size\n    with torch.no_grad():\n        w_p = F.pad(w.float(), (0, pad_len))\n        b_max = w_p.view(-1, block_size).abs().amax(dim=1)\n        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)\n    w_p_o = F.pad(w, (0, pad_len))\n    s_v = s.float().view(-1, 1)\n    w_p_s_v = w_p_o.view(-1, block_size) / s_v\n    q_ste = w_p_s_v - w_p_s_v.detach() + torch.round(w_p_s_v.clamp(-(current_clip+1), current_clip)).detach()\n    q_res = (q_ste * s_v).view_as(w_p_o)\n    q_final = q_res[:, :orig_shape[1]] if pad_len > 0 else q_res\n    return torch.where(is_qat, q_final, w)"
+      }
+    ]
   }
 ]

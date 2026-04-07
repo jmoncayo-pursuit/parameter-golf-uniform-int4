@@ -481,7 +481,7 @@ class RMSNorm(nn.Module):
 def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):
     is_qat = (step >= qat_start_step)
     ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
-    alpha = 0.5 * (1.0 - torch.cos(ratio * math.pi))
+    alpha = ratio ** 2.0
     current_clip = 127 - alpha * (127 - clip_range)
     orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size
     with torch.no_grad():
