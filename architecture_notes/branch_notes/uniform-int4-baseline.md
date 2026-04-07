@@ -1,5 +1,7 @@
 # Uniform Int4@4.0
 
+![Uniform Int4 Architecture - 3D Layout](../../assets/uniform_int4_architecture.png)
+
 This file describes the canonical baseline stack for **Uniform Int4@4.0** in **`parameter-golf-uniform-int4`**.
 
 ## Positioning

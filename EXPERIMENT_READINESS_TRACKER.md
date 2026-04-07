@@ -17,7 +17,7 @@ Use [RUNPOD_PROOF_RUNBOOK.md](/Users/jmoncayopursuit.org/Desktop/parameter-golf-
 
 | Experiment Name | Canonical Location | Type | Readiness Status | Notes |
 |:---|:---|:---:|:---|:---|
-| Uniform Int4@4.0 | [parameter-golf-uniform-int4](/Users/jmoncayopursuit.org/Desktop/parameter-golf-uniform-int4) | Full Repo | Ready for 3,000-step Signal Run | 700-step proof passed. Settings finalized (3k steps, 262k tokens, 1024 seq_len, lzma) in `uniform_int4_kaggle_runbook.ipynb`. Indentation errors in `train_gpt.py` fixed. |
+| Uniform Int4@4.0 | [parameter-golf-uniform-int4](/Users/jmoncayopursuit.org/Desktop/parameter-golf-uniform-int4) | Full Repo | Parked (3000-step proof) | Kaggle hours exhausted. 3k-step run validated architecture (1.45 BPB). Pivoting to Bayesian Backoff / TT Adapter. |
 
 ## How to use this
 

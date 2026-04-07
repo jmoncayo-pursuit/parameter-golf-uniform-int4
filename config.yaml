@@ -44,7 +44,6 @@ environments:
   kaggle:
     test_cmd: "python3 train_gpt.py"
     short_env:
-      # Kaggle specific env vars if needed
       ITERATIONS: "600"
       TRAIN_SEQ_LEN: "512"
       TRAIN_BATCH_TOKENS: "16384"
@@ -52,3 +51,20 @@ environments:
       ITERATIONS: "1500"
       TRAIN_SEQ_LEN: "512"
       TRAIN_BATCH_TOKENS: "16384"
+
+  colab:
+    test_cmd: "python3 train_gpt.py"
+    short_env:
+      NO_COMPILE: "1"
+      ITERATIONS: "500"
+      WARMDOWN_ITERS: "80"
+      TRAIN_SEQ_LEN: "384"
+      TRAIN_BATCH_TOKENS: "8192"
+      VAL_MAX_TOKENS: "32768"
+    val_env:
+      NO_COMPILE: "1"
+      ITERATIONS: "1200"
+      WARMDOWN_ITERS: "80"
+      TRAIN_SEQ_LEN: "384"
+      TRAIN_BATCH_TOKENS: "8192"
+      VAL_MAX_TOKENS: "65536"
