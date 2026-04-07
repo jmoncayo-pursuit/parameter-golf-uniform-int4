@@ -18,16 +18,45 @@ class AgentClass:
     return VertexAiSessionService()
 
   def set_up(self):
-    """Sets up the ADK application."""
-    root_agent = llm_agent.LlmAgent(
-      name='ParameterGolfEvolver',
+    """Sets up the Multi-Agent ADK application."""
+    
+    # 1. The Evolver Specialist
+    evolver_agent = llm_agent.LlmAgent(
+      name='EvolverAgent',
       model='gemini-3.1-pro-preview',
       description=(
-          'Delegated to when analyzing model training leaderboards, evaluating evolutionary JSON metric results, or generating new PyTorch codebase mutations to optimize bits-per-byte (BPB). Routes here when the user explicitly requests to "evolve" code, analyze past generation matrices, or write optimal Tensor math.'
+          'Specialist dedicated exclusively to generating high-quality code mutations for PyTorch tensors. Use this agent when you need to write or evolve actual code.'
       ),
       sub_agents=[],
-      instruction='You are ParameterGolfEvolver, an expert evolutionary optimization agent for the OpenAI Parameter Golf challenge.\n\nYour role is to actively help evolve training code to achieve the best roundtrip BPB while staying strictly under the 16MB artifact limit.\n\nYou have access to the user\'s repositories and data stores. When the user says "evolve <target>" or "analyze", do the following:\n\n1. Understand Context: Check the current state of the relevant repo/branch (Uniform Int4@4.0).\n2. Generate Mutations: Produce 3-5 concrete, detailed code mutations for the requested target. Wrap each in clear \'# EVOLVE: target_START\' and \'# EVOLVE: target_END\' markers.\n3. Design Tests: Generate an optimized hyperparameter test design for evaluating these mutations realistically in Colab without hitting timeouts. Specifically, output the desired hyperparameter config (e.g. ITERATIONS). CRITICAL CONSTRAINT: You must specify a minimum of 400-500 iterations for any test; anything less will result in unstable BPB noise that cannot be scientifically validated.\n4. Analyze Results: When the user provides run results from the evolution_leaderboard.json, compare BPB, artifact size, and stability. Recommend the best mutation and explain the trade-offs.\n5. Track Progress: Maintain memory of previous generations and suggest logical next targets.\n\nPriorities (in order):\n- Lowest possible roundtrip BPB\n- Artifact size safely under 16MB with good headroom\n- Code stability and compatibility with existing quantization/dequantization pipeline\n\nTone: Highly technical, concise, data-driven, and honest. Always ground suggestions in actual metrics. Never hallucinate numbers.',
+      instruction='You are the Evolver Agent for Parameter Golf. Your only job is to generate high-quality code mutations for a given target (e.g. QAT ramp, pruning logic).\nWhen the user gives you a target and a current code block:\n- Generate 3-5 semantically different, mathematically reasonable mutations.\n- Wrap each precisely in # EVOLVE: target_START and # EVOLVE: target_END markers.\n- Keep changes focused, avoiding massive rewrites, and compatible with int4/int6 structures.\n- Briefly explain the mathematical logic behind each mutation.',
       tools=[],
+    )
+
+    # 2. The Analyst Specialist
+    analyst_agent = llm_agent.LlmAgent(
+      name='AnalystAgent',
+      model='gemini-3.1-pro-preview',
+      description=(
+          'Specialist dedicated exclusively to reading JSON leaderboards, comparing metrics, and deciding which mutation won. Use this agent when you need to analyze results or BPB scores.'
+      ),
+      sub_agents=[],
+      instruction='You are the Analyst Agent for Parameter Golf. Your only job is to analyze evolution telemetry results.\nWhen given leaderboard data (JSON) or logs:\n- Compare mutations strictly by roundtrip BPB and total artifact size.\n- Explain exactly why certain mutations achieved lower BPB or why they failed the 16MB constraint.\n- Recommend the absolute best mutation to take forward as the baseline.\n- Suggest the most logical next target function to evolve.',
+      tools=[],
+    )
+
+    # 3. The Root Orchestrator
+    root_agent = llm_agent.LlmAgent(
+      name='OrchestratorAgent',
+      model='gemini-3.1-pro-preview',
+      description=(
+          'The master orchestrator that receives queries from the user and decides whether to route them to the EvolverAgent for coding or the AnalystAgent for leaderboard evaluation.'
+      ),
+      sub_agents=[],
+      instruction='You are the Orchestrator for Parameter Golf. You receive requests from the user. If the user provides a JSON payload and asks you to analyze it, route the request directly to the AnalystAgent. If the user asks for new code mutations, route the request to the EvolverAgent. Wait for their specialized response and return it to the user.',
+      tools=[
+        agent_tool.AgentTool(agent=evolver_agent),
+        agent_tool.AgentTool(agent=analyst_agent)
+      ],
     )
 
     self.app = AdkApp(
