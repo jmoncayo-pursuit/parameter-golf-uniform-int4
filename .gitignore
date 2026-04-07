@@ -14,3 +14,4 @@ data/docs_selected.jsonl
 logs/
 colab_*.ipynb
 !colab_uniform_int4_runbook.ipynb
+.env
