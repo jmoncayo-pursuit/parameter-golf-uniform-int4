@@ -19,7 +19,38 @@ class AgentClass:
 
   def set_up(self):
     """Sets up the Multi-Agent ADK application."""
+    import os
+
+    # Load local context dynamically so the Evolver always has the bleeding edge code.
+    train_gpt_code = "Error: train_gpt.py not found."
+    if os.path.exists("train_gpt.py"):
+        with open("train_gpt.py", "r") as f:
+            train_gpt_code = f.read()
+            
+    arch_notes = "Error: architecture notes not found."
+    arch_path = "architecture_notes/branch_notes/uniform-int4-baseline.md"
+    if os.path.exists(arch_path):
+        with open(arch_path, "r") as f:
+            arch_notes = f.read()
     
+    evolver_instruction = f"""You are the Evolver Agent for Parameter Golf. Your only job is to generate high-quality code mutations for a given target (e.g. QAT ramp, pruning logic).
+When the user gives you a target:
+- Generate 3-5 semantically different, mathematically reasonable mutations.
+- Wrap each precisely in # EVOLVE: target_START and # EVOLVE: target_END markers.
+- Keep changes focused, avoiding massive rewrites, and compatible with int4/int6 structures.
+- Briefly explain the mathematical logic behind each mutation.
+
+Here is your mandatory architecture context showing constraints:
+```markdown
+{arch_notes}
+```
+
+Here is the entire actual current `train_gpt.py` codebase you are mutating. Read it carefully before proposing mutations:
+```python
+{train_gpt_code}
+```
+"""
+
     # 1. The Evolver Specialist
     evolver_agent = llm_agent.LlmAgent(
       name='EvolverAgent',
@@ -28,7 +59,7 @@ class AgentClass:
           'Specialist dedicated exclusively to generating high-quality code mutations for PyTorch tensors. Use this agent when you need to write or evolve actual code.'
       ),
       sub_agents=[],
-      instruction='You are the Evolver Agent for Parameter Golf. Your only job is to generate high-quality code mutations for a given target (e.g. QAT ramp, pruning logic).\nWhen the user gives you a target and a current code block:\n- Generate 3-5 semantically different, mathematically reasonable mutations.\n- Wrap each precisely in # EVOLVE: target_START and # EVOLVE: target_END markers.\n- Keep changes focused, avoiding massive rewrites, and compatible with int4/int6 structures.\n- Briefly explain the mathematical logic behind each mutation.',
+      instruction=evolver_instruction,
       tools=[],
     )
 
