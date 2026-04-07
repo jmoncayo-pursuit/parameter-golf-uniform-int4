@@ -187,9 +187,9 @@ def eval_val(
     total_seqs = (val_tokens.numel() - 1) // args.train_seq_len
     seq_start = (total_seqs * rank) // world_size
     seq_end = (total_seqs * (rank + 1)) // world_size
-    val_loss_sum = torch.zeros((), device=device, dtype=torch.float64)
-    val_token_count = torch.zeros((), device=device, dtype=torch.float64)
-    val_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+    val_loss_sum = torch.zeros((), device=device, dtype=torch.float32)
+    val_token_count = torch.zeros((), device=device, dtype=torch.float32)
+    val_byte_count = torch.zeros((), device=device, dtype=torch.float32)
     model.eval()
     with torch.inference_mode():
         for batch_seq_start in range(seq_start, seq_end, local_batch_seqs):
@@ -202,13 +202,13 @@ def eval_val(
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=True):
                 batch_loss = model(x, y).detach()
             batch_token_count = float(y.numel())
-            val_loss_sum += batch_loss.to(torch.float64) * batch_token_count
+            val_loss_sum += batch_loss.to(torch.float32) * batch_token_count
             val_token_count += batch_token_count
             prev_ids = x.reshape(-1)
             tgt_ids = y.reshape(-1)
             token_bytes = base_bytes_lut[tgt_ids].to(dtype=torch.int16)
             token_bytes += (has_leading_space_lut[tgt_ids] & ~is_boundary_token_lut[prev_ids]).to(dtype=torch.int16)
-            val_byte_count += token_bytes.to(torch.float64).sum()
+            val_byte_count += token_bytes.to(torch.float32).sum()
     if dist.is_available() and dist.is_initialized():
         dist.all_reduce(val_loss_sum, op=dist.ReduceOp.SUM)
         dist.all_reduce(val_token_count, op=dist.ReduceOp.SUM)
@@ -480,13 +480,14 @@ class RMSNorm(nn.Module):
 # EVOLVE: qat_ramp_START
 def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):
     is_qat = (step >= qat_start_step)
-    alpha = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
+    ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
+    alpha = 0.5 * (1.0 - torch.cos(ratio * math.pi))
     current_clip = 127 - alpha * (127 - clip_range)
     orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size
     with torch.no_grad():
         w_p = F.pad(w.float(), (0, pad_len))
         b_max = w_p.view(-1, block_size).abs().amax(dim=1)
-        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float16).clamp_min(torch.finfo(torch.float16).tiny)
+        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)
     w_p_o = F.pad(w, (0, pad_len))
     s_v = s.float().view(-1, 1)
     w_p_s_v = w_p_o.view(-1, block_size) / s_v
@@ -872,9 +873,9 @@ def eval_val_sliding(
     my_e = (total_windows * (rank + 1)) // world_size
     my_windows = window_starts[my_s:my_e]
 
-    loss_sum = torch.zeros((), device=device, dtype=torch.float64)
-    token_count = torch.zeros((), device=device, dtype=torch.float64)
-    byte_count = torch.zeros((), device=device, dtype=torch.float64)
+    loss_sum = torch.zeros((), device=device, dtype=torch.float32)
+    token_count = torch.zeros((), device=device, dtype=torch.float32)
+    byte_count = torch.zeros((), device=device, dtype=torch.float32)
 
     base_model.eval()
     with torch.inference_mode():
@@ -901,13 +902,13 @@ def eval_val_sliding(
             for i, ws in enumerate(batch_ws):
                 wlen = wlens[i]
                 s = 0 if ws == 0 else max(wlen - stride, 0)
-                scored_nll = nll[i, s:wlen].to(torch.float64)
+                scored_nll = nll[i, s:wlen].to(torch.float32)
                 loss_sum += scored_nll.sum()
                 token_count += float(wlen - s)
                 tgt = y_batch[i, s:wlen]
                 prev = x_batch[i, s:wlen]
-                tb = base_bytes_lut[tgt].to(torch.float64)
-                tb += (has_leading_space_lut[tgt] & ~is_boundary_token_lut[prev]).to(torch.float64)
+                tb = base_bytes_lut[tgt].to(torch.float32)
+                tb += (has_leading_space_lut[tgt] & ~is_boundary_token_lut[prev]).to(torch.float32)
                 byte_count += tb.sum()
             if rank == 0 and (bi // batch_seqs) % 50 == 0:
                 done = min(bi + batch_seqs, len(my_windows))
@@ -954,9 +955,9 @@ def eval_val_sliding_cached(
     my_e = (total_windows * (rank + 1)) // world_size
     my_windows = window_starts[my_s:my_e]
 
-    loss_sum = torch.zeros((), device=device, dtype=torch.float64)
-    token_count = torch.zeros((), device=device, dtype=torch.float64)
-    byte_count = torch.zeros((), device=device, dtype=torch.float64)
+    loss_sum = torch.zeros((), device=device, dtype=torch.float32)
+    token_count = torch.zeros((), device=device, dtype=torch.float32)
+    byte_count = torch.zeros((), device=device, dtype=torch.float32)
 
     base_model.eval()
     with torch.inference_mode():
@@ -1009,8 +1010,8 @@ def eval_val_sliding_cached(
                     # Byte counting
                     tgt = y_batch[i, j]
                     prev = x_batch[i, j]
-                    tb = base_bytes_lut[tgt].to(torch.float64)
-                    tb += (has_leading_space_lut[tgt] & ~is_boundary_token_lut[prev]).to(torch.float64)
+                    tb = base_bytes_lut[tgt].to(torch.float32)
+                    tb += (has_leading_space_lut[tgt] & ~is_boundary_token_lut[prev]).to(torch.float32)
                     byte_count += tb.item()
                     
                     # Update cache for the NEXT token's prediction
@@ -1057,8 +1058,8 @@ def main() -> None:
     grad_scale = 1.0 / grad_accum_steps
     if not torch.cuda.is_available():
         if torch.backends.mps.is_available():
-            print("CUDA missing, using MPS for local testing", flush=True)
-            device = torch.device("mps")
+            print("CUDA missing, using CPU instead of MPS to avoid accelerator bugs", flush=True)
+            device = torch.device("cpu")
         else:
             print("CUDA/MPS missing, using CPU for local testing", flush=True)
             device = torch.device("cpu")

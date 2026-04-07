@@ -1,0 +1,54 @@
+project_name: "Parameter Golf - Uniform Int4"
+target_file: "train_gpt.py"
+leaderboard_file: "evolution_leaderboard.json"
+num_mutations: 4
+git_commit: true
+
+# Markers behavior
+marker_prefix: "# EVOLVE:"
+marker_start_suffix: "_START"
+marker_end_suffix: "_END"
+
+# Result extraction from summary JSON
+result_file: "final_summary.json"
+bpb_key: "roundtrip_val_bpb"
+size_key: "total_submission_bytes"
+
+# Scoring logic (weights)
+scoring:
+  bpb_weight: 25000
+  size_weight_factor: 1000
+  size_limit_bytes: 16777216 # 16MB (Hard Limit)
+  safe_size_limit_bytes: 15800000 # 15.8MB - start penalizing here
+  penalty_factor: 10000 # Increased penalty factor
+
+# Test Environments
+environments:
+  local:
+    test_cmd: ".venv/bin/python3 train_gpt.py"
+    short_env:
+      ITERATIONS: "30"
+      TRAIN_SEQ_LEN: "512"
+      TRAIN_BATCH_TOKENS: "16384"
+      VAL_MAX_TOKENS: "8192"
+      VAL_BATCH_SIZE: "8192"
+      CHECKPOINT_ONLY: "0"
+    val_env:
+      ITERATIONS: "60"
+      TRAIN_SEQ_LEN: "512"
+      TRAIN_BATCH_TOKENS: "16384"
+      VAL_MAX_TOKENS: "16384"
+      VAL_BATCH_SIZE: "8192"
+      CHECKPOINT_ONLY: "0"
+
+  kaggle:
+    test_cmd: "python3 train_gpt.py"
+    short_env:
+      # Kaggle specific env vars if needed
+      ITERATIONS: "600"
+      TRAIN_SEQ_LEN: "512"
+      TRAIN_BATCH_TOKENS: "16384"
+    val_env:
+      ITERATIONS: "1500"
+      TRAIN_SEQ_LEN: "512"
+      TRAIN_BATCH_TOKENS: "16384"

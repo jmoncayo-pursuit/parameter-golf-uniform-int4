@@ -1,0 +1,28 @@
+[
+  {
+    "gen": 0,
+    "target": "baseline",
+    "timestamp": 1712390400,
+    "variants": [
+      {
+        "trial": 0,
+        "score": 1816.0,
+        "bpb": 1.8,
+        "size": 16000000,
+        "code": "Original Baseline"
+      }
+    ]
+  },
+  {
+    "gen": 1,
+    "parent_gen": null,
+    "target": "qat_ramp",
+    "variants": []
+  },
+  {
+    "gen": 1,
+    "parent_gen": null,
+    "target": "qat_ramp",
+    "variants": []
+  }
+]
