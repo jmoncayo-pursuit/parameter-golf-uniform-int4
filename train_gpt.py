@@ -30,7 +30,8 @@ class Hyperparameters:
     tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_1024_bpe.model")
     run_id, seed = os.environ.get("RUN_ID", str(uuid.uuid4())), int(os.environ.get("SEED", 42))
     def e(k, v, t): return t(os.environ.get(k, v))
-    val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 524288, int), e("VAL_LOSS_EVERY", 125, int), e("VAL_MAX_TOKENS", 0, int), e("TRAIN_LOG_EVERY", 1, int)
+    val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 32768, int), e("VAL_LOSS_EVERY", 125, int), e("VAL_MAX_TOKENS", 0, int), e("TRAIN_LOG_EVERY", 1, int)
+
 
 
     iterations, warmdown_iters, warmup_steps = e("ITERATIONS", 3000, int), e("WARMDOWN_ITERS", 500, int), e("WARMUP_STEPS", 20, int)
