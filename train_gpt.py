@@ -31,8 +31,9 @@ class Hyperparameters:
     run_id, seed = os.environ.get("RUN_ID", str(uuid.uuid4())), int(os.environ.get("SEED", 42))
     def e(k, v, t): return t(os.environ.get(k, v))
     val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 524288, int), e("VAL_LOSS_EVERY", 500, int), e("VAL_MAX_TOKENS", 0, int), e("TRAIN_LOG_EVERY", 100, int)
-    iterations, warmdown_iters, warmup_steps = e("ITERATIONS", 20000, int), e("WARMDOWN_ITERS", 3000, int), e("WARMUP_STEPS", 20, int)
-    train_batch_tokens, train_seq_len, max_wallclock_seconds = e("TRAIN_BATCH_TOKENS", 262144, int), e("TRAIN_SEQ_LEN", 1024, int), e("MAX_WALLCLOCK_SECONDS", 0.0, float)
+    iterations, warmdown_iters, warmup_steps = e("ITERATIONS", 3000, int), e("WARMDOWN_ITERS", 500, int), e("WARMUP_STEPS", 20, int)
+    train_batch_tokens, train_seq_len, max_wallclock_seconds = e("TRAIN_BATCH_TOKENS", 32768, int), e("TRAIN_SEQ_LEN", 1024, int), e("MAX_WALLCLOCK_SECONDS", 0.0, float)
+
     qk_gain_init, vocab_size, num_layers, num_kv_heads = e("QK_GAIN_INIT", 1.5, float), e("VOCAB_SIZE", 1024, int), e("NUM_LAYERS", 10, int), e("NUM_KV_HEADS", 4, int)
     model_dim, num_heads, mlp_mult, tie_embeddings = e("MODEL_DIM", 512, int), e("NUM_HEADS", 8, int), e("MLP_MULT", 4.0, float), bool(int(os.environ.get("TIE_EMBEDDINGS", 1)))
     rope_base, logit_softcap = e("ROPE_BASE", 10000.0, float), e("LOGIT_SOFTCAP", 30.0, float)
