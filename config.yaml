@@ -56,10 +56,10 @@ environments:
     test_cmd: "python3 train_gpt.py"
     short_env:
       NO_COMPILE: "1"
-      ITERATIONS: "500"
+      ITERATIONS: "3000"
       WARMDOWN_ITERS: "80"
-      TRAIN_SEQ_LEN: "512"
-      TRAIN_BATCH_TOKENS: "8192"
+      TRAIN_SEQ_LEN: "1024"
+      TRAIN_BATCH_TOKENS: "32768"
       VAL_MAX_TOKENS: "32768"
     val_env:
       NO_COMPILE: "1"
