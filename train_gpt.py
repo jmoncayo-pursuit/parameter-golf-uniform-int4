@@ -439,7 +439,10 @@ class TokenStream:
             avail = self.tokens.numel() - self.pos
             if avail <= 0:
                 self._advance_file()
+                if self.tokens.numel() == 0:
+                    raise EOFError(f"Shard {self.files[self.file_idx]} is empty or corrupted. Cannot continue training.")
                 continue
+
             k = min(remaining, avail)
             chunks.append(self.tokens[self.pos : self.pos + k])
             self.pos += k
