@@ -1096,10 +1096,12 @@ def main() -> None:
         if not master_process:
             return
         if console:
-            print(msg)
+            print(msg, flush=True)
         if logfile is not None:
             with open(logfile, "a", encoding="utf-8") as f:
                 print(msg, file=f)
+                f.flush()
+
 
     log0(code, console=False)
     log0("=" * 100, console=False)
