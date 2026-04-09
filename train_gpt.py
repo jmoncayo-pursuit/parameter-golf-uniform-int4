@@ -1297,7 +1297,8 @@ def main() -> None:
     while True:
         last_step = step == args.iterations or (stop_after_step is not None and step >= stop_after_step)
 
-        should_validate = last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)
+        should_validate = last_step or (step > 0 and args.val_loss_every > 0 and step % args.val_loss_every == 0)
+
         if should_validate:
             if device.type == "cuda": torch.cuda.synchronize()
             elif device.type == "mps": torch.mps.synchronize()
@@ -1313,6 +1314,10 @@ def main() -> None:
             if device.type == "cuda": torch.cuda.synchronize()
             elif device.type == "mps": torch.mps.synchronize()
             t0 = time.perf_counter()
+        
+        if step % args.train_log_every == 0:
+            log0(f"step:{step}/{args.iterations}")
+
 
         if last_step:
             if stop_after_step is not None and step < args.iterations:
