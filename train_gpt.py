@@ -194,6 +194,8 @@ def eval_val(
     val_loss_sum = torch.zeros((), device=device, dtype=torch.float32)
     val_token_count = torch.zeros((), device=device, dtype=torch.float32)
     val_byte_count = torch.zeros((), device=device, dtype=torch.float32)
+    total_batches = (seq_end - seq_start + local_batch_seqs - 1) // local_batch_seqs
+    batch_idx = 0
     model.eval()
     with torch.inference_mode():
         for batch_seq_start in range(seq_start, seq_end, local_batch_seqs):
@@ -213,6 +215,9 @@ def eval_val(
             token_bytes = base_bytes_lut[tgt_ids].to(dtype=torch.int16)
             token_bytes += (has_leading_space_lut[tgt_ids] & ~is_boundary_token_lut[prev_ids]).to(dtype=torch.int16)
             val_byte_count += token_bytes.to(torch.float32).sum()
+            batch_idx += 1
+            if batch_idx % 4 == 0 or batch_idx == total_batches:
+                print(f"  val_batch:{batch_idx}/{total_batches}", flush=True)
     if dist.is_available() and dist.is_initialized():
         dist.all_reduce(val_loss_sum, op=dist.ReduceOp.SUM)
         dist.all_reduce(val_token_count, op=dist.ReduceOp.SUM)
@@ -1316,9 +1321,6 @@ def main() -> None:
             if device.type == "cuda": torch.cuda.synchronize()
             elif device.type == "mps": torch.mps.synchronize()
             t0 = time.perf_counter()
-        
-        if step % args.train_log_every == 0:
-            log0(f"step:{step}/{args.iterations}")
 
 
         if last_step:
