@@ -481,16 +481,18 @@ class RMSNorm(nn.Module):
 def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):
     is_qat = (step >= qat_start_step)
     ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
-    alpha = ratio ** 2.0
-    current_clip = 127 - alpha * (127 - clip_range)
+    current_clip = 127 - ratio * (127 - clip_range)
     orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size
     with torch.no_grad():
         w_p = F.pad(w.float(), (0, pad_len))
         b_max = w_p.view(-1, block_size).abs().amax(dim=1)
-        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)
+        s = (b_max / current_clip).clamp_min(1e-12).to(torch.float16).clamp_min(torch.finfo(torch.float16).tiny)
     w_p_o = F.pad(w, (0, pad_len))
     s_v = s.float().view(-1, 1)
-    w_p_s_v = w_p_o.view(-1, block_size) / s_v
+    w_p_s_v = (w_p_o.view(-1, block_size) / s_v)
+    if is_qat and ratio < 1.0:
+        noise = (torch.rand_like(w_p_s_v) - 0.5) * (1.0 - ratio) * 0.1
+        w_p_s_v = w_p_s_v + noise
     q_ste = w_p_s_v - w_p_s_v.detach() + torch.round(w_p_s_v.clamp(-(current_clip+1), current_clip)).detach()
     q_res = (q_ste * s_v).view_as(w_p_o)
     q_final = q_res[:, :orig_shape[1]] if pad_len > 0 else q_res
