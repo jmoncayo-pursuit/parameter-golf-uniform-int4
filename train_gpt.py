@@ -492,7 +492,9 @@ class RMSNorm(nn.Module):
 # EVOLVE: qat_ramp_START
 def fake_quantize_intN_fw_pass(w, step, qat_start_step, clip_range, block_size=128):
     is_qat = (step >= qat_start_step)
-    ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
+    # Cosine QAT ramp: smoother transition than linear, preserves capacity better
+    linear_ratio = torch.clamp((step.float() - qat_start_step.float()) / 1000.0, 0.0, 1.0)
+    ratio = 0.5 * (1.0 - torch.cos(linear_ratio * math.pi))  # cosine ease-in-out
     current_clip = 127 - ratio * (127 - clip_range)
     orig_shape, pad_len = w.shape, (block_size - (w.shape[1] % block_size)) % block_size
     with torch.no_grad():
@@ -1521,8 +1523,8 @@ def main() -> None:
     device_sync()
     t_qeval = time.perf_counter()
     if args.eval_stride > 0 and args.eval_stride < args.train_seq_len:
-        log0(f"final_eval_mode:sliding_window stride:{args.eval_stride} batch_seqs:{args.eval_batch_seqs} cache:{os.environ.get('EVAL_CACHE', '0')=='1'}")
-        if os.environ.get("EVAL_CACHE", "0") == "1":
+        log0(f"final_eval_mode:sliding_window stride:{args.eval_stride} batch_seqs:{args.eval_batch_seqs} cache:{os.environ.get('EVAL_CACHE', '1')=='1'}")
+        if os.environ.get("EVAL_CACHE", "1") == "1":
             q_val_loss, q_val_bpb = eval_val_sliding_cached(
                 args, base_model, rank, world_size, device,
                 val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
