@@ -1074,13 +1074,22 @@ def main() -> None:
     grad_scale = 1.0 / grad_accum_steps
     # --- Device auto-detection: CUDA > TPU/XLA > CPU ---
     _use_xla = False
+    _xla_sync = None
     try:
-        import torch_xla.core.xla_model as xm
-        device = xm.xla_device()
+        import torch_xla
+        device = torch_xla.device()
+        _xla_sync = torch_xla.sync
         _use_xla = True
         print(f"Using TPU/XLA device: {device}", flush=True)
-    except (ImportError, RuntimeError):
-        pass
+    except (ImportError, RuntimeError, AttributeError):
+        try:
+            import torch_xla.core.xla_model as xm
+            device = xm.xla_device()
+            _xla_sync = xm.mark_step
+            _use_xla = True
+            print(f"Using TPU/XLA device (legacy API): {device}", flush=True)
+        except (ImportError, RuntimeError):
+            pass
 
     if not _use_xla:
         if torch.cuda.is_available():
@@ -1109,7 +1118,7 @@ def main() -> None:
     def device_sync():
         """Device-agnostic synchronization barrier."""
         if _use_xla:
-            xm.mark_step()
+            _xla_sync()
         elif device.type == "cuda":
             torch.cuda.synchronize()
         elif device.type == "mps":
