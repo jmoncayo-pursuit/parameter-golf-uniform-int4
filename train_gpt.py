@@ -197,7 +197,7 @@ def eval_val(
     total_batches = (seq_end - seq_start + local_batch_seqs - 1) // local_batch_seqs
     batch_idx = 0
     model.eval()
-    with torch.inference_mode():
+    with torch.no_grad():
         for batch_seq_start in range(seq_start, seq_end, local_batch_seqs):
             batch_seq_end = min(batch_seq_start + local_batch_seqs, seq_end)
             raw_start = batch_seq_start * args.train_seq_len
@@ -894,7 +894,7 @@ def eval_val_sliding(
     byte_count = torch.zeros((), device=device, dtype=torch.float32)
 
     base_model.eval()
-    with torch.inference_mode():
+    with torch.no_grad():
         for bi in range(0, len(my_windows), batch_seqs):
             batch_ws = my_windows[bi:bi + batch_seqs]
             bsz = len(batch_ws)
@@ -976,7 +976,7 @@ def eval_val_sliding_cached(
     byte_count = torch.zeros((), device=device, dtype=torch.float32)
 
     base_model.eval()
-    with torch.inference_mode():
+    with torch.no_grad():
         for bi in range(0, len(my_windows), batch_seqs):
             batch_ws = my_windows[bi:bi + batch_seqs]
             bsz = len(batch_ws)
