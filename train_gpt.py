@@ -1239,7 +1239,7 @@ def main() -> None:
         betas=(args.beta1, args.beta2),
         eps=args.adam_eps,
         weight_decay=args.weight_decay,
-        fused=True,
+        fused=(device.type == "cuda"),
     )
     optimizers: list[torch.optim.Optimizer] = [optimizer_tok, optimizer_muon, optimizer_scalar]
     if base_model.lm_head is not None:
