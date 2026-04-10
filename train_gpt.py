@@ -30,7 +30,7 @@ class Hyperparameters:
     tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_1024_bpe.model")
     run_id, seed = os.environ.get("RUN_ID", str(uuid.uuid4())), int(os.environ.get("SEED", 42))
     def e(k, v, t): return t(os.environ.get(k, v))
-    val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 32768, int), e("VAL_LOSS_EVERY", 125, int), e("VAL_MAX_TOKENS", 65536, int), e("TRAIN_LOG_EVERY", 1, int)
+    val_batch_size, val_loss_every, val_max_tokens, train_log_every = e("VAL_BATCH_SIZE", 32768, int), e("VAL_LOSS_EVERY", 125, int), e("VAL_MAX_TOKENS", 65536, int), e("TRAIN_LOG_EVERY", 10, int)
 
 
 
@@ -1406,12 +1406,12 @@ def main() -> None:
         # SWA: collect checkpoints during warmdown
         if args.swa_enabled and scale < args.swa_start_frac and step % args.swa_every == 0:
             if swa_state is None:
-                swa_state = {name: t.detach().cpu().clone() for name, t in base_model.state_dict().items()}
+                swa_state = {name: t.detach().clone() for name, t in base_model.state_dict().items()}
                 swa_count = 1
                 log0(f"swa:start step:{step}")
             else:
                 for name, t in base_model.state_dict().items():
-                    swa_state[name] += t.detach().cpu()
+                    swa_state[name] += t.detach()
                 swa_count += 1
 
         should_log_train = (
