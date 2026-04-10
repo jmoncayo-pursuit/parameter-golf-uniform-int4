@@ -1070,29 +1070,48 @@ def main() -> None:
         raise ValueError(f"WORLD_SIZE={world_size} must divide 8 so grad_accum_steps stays integral")
     grad_accum_steps = 8 // world_size
     grad_scale = 1.0 / grad_accum_steps
-    if not torch.cuda.is_available():
-        if torch.backends.mps.is_available():
-            print("CUDA missing, using CPU instead of MPS to avoid accelerator bugs", flush=True)
-            device = torch.device("cpu")
+    # --- Device auto-detection: CUDA > TPU/XLA > CPU ---
+    _use_xla = False
+    try:
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+        _use_xla = True
+        print(f"Using TPU/XLA device: {device}", flush=True)
+    except (ImportError, RuntimeError):
+        pass
+
+    if not _use_xla:
+        if torch.cuda.is_available():
+            device = torch.device("cuda", local_rank)
+            torch.cuda.set_device(device)
         else:
-            print("CUDA/MPS missing, using CPU for local testing", flush=True)
+            print("CUDA/TPU missing, using CPU for local testing", flush=True)
             device = torch.device("cpu")
-    else:
-        device = torch.device("cuda", local_rank)
-        torch.cuda.set_device(device)
-    if distributed:
+
+    if distributed and not _use_xla:
         dist.init_process_group(backend="nccl", device_id=device)
         dist.barrier()
     master_process = rank == 0
 
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    from torch.backends.cuda import enable_cudnn_sdp, enable_flash_sdp, enable_math_sdp, enable_mem_efficient_sdp
-    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
-        enable_cudnn_sdp(False)
-        enable_flash_sdp(True)
-        enable_mem_efficient_sdp(False)
-        enable_math_sdp(False)
+    # CUDA-specific optimizations (skip on TPU/CPU)
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        from torch.backends.cuda import enable_cudnn_sdp, enable_flash_sdp, enable_math_sdp, enable_mem_efficient_sdp
+        if torch.cuda.get_device_capability()[0] >= 8:
+            enable_cudnn_sdp(False)
+            enable_flash_sdp(True)
+            enable_mem_efficient_sdp(False)
+            enable_math_sdp(False)
+
+    def device_sync():
+        """Device-agnostic synchronization barrier."""
+        if _use_xla:
+            xm.mark_step()
+        elif device.type == "cuda":
+            torch.cuda.synchronize()
+        elif device.type == "mps":
+            torch.mps.synchronize()
 
     logfile = None
     if master_process:
@@ -1127,7 +1146,8 @@ def main() -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     if not args.tokenizer_path.endswith(".model"):
         raise ValueError(f"Script only setup for SentencePiece .model file: {args.tokenizer_path}")
@@ -1201,7 +1221,7 @@ def main() -> None:
         betas=(args.beta1, args.beta2),
         eps=args.adam_eps,
         weight_decay=args.weight_decay,
-        fused=True,
+        fused=(device.type == "cuda"),
     )
     optimizer_muon = Muon(
         matrix_params,
@@ -1225,7 +1245,7 @@ def main() -> None:
             [{"params": [base_model.lm_head.weight], "lr": args.head_lr, "base_lr": args.head_lr}],
             betas=(args.beta1, args.beta2),
             eps=args.adam_eps,
-            fused=True,
+            fused=(device.type == "cuda"),
         )
         optimizers.insert(1, optimizer_head)
 
@@ -1295,8 +1315,7 @@ def main() -> None:
     stop_after_step: int | None = None
     swa_state: dict[str, Tensor] | None = None
     swa_count = 0
-    if device.type == "cuda": torch.cuda.synchronize()
-    elif device.type == "mps": torch.mps.synchronize()
+    device_sync()
     t0 = time.perf_counter()
 
     step = 0
@@ -1307,8 +1326,7 @@ def main() -> None:
         should_validate = last_step or (step > 0 and args.val_loss_every > 0 and step % args.val_loss_every == 0)
 
         if should_validate:
-            if device.type == "cuda": torch.cuda.synchronize()
-            elif device.type == "mps": torch.mps.synchronize()
+            device_sync()
             training_time_ms += 1000.0 * (time.perf_counter() - t0)
             val_loss, val_bpb = eval_val(
                 args, model, rank, world_size, device, grad_accum_steps,
@@ -1318,8 +1336,7 @@ def main() -> None:
                 f"step:{step}/{args.iterations} val_loss:{val_loss:.4f} val_bpb:{val_bpb:.4f} "
                 f"train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms / max(step, 1):.2f}ms"
             )
-            if device.type == "cuda": torch.cuda.synchronize()
-            elif device.type == "mps": torch.mps.synchronize()
+            device_sync()
             t0 = time.perf_counter()
 
 
@@ -1501,8 +1518,7 @@ def main() -> None:
     base_model.load_state_dict(deq_state, strict=True)
 
     # Sliding window eval on mixed-quant-roundtripped weights (Int6 Attn / Int4 MLP)
-    if device.type == "cuda": torch.cuda.synchronize()
-    elif device.type == "mps": torch.mps.synchronize()
+    device_sync()
     t_qeval = time.perf_counter()
     if args.eval_stride > 0 and args.eval_stride < args.train_seq_len:
         log0(f"final_eval_mode:sliding_window stride:{args.eval_stride} batch_seqs:{args.eval_batch_seqs} cache:{os.environ.get('EVAL_CACHE', '0')=='1'}")
@@ -1524,8 +1540,7 @@ def main() -> None:
             args, model, rank, world_size, device, grad_accum_steps,
             val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
         )
-    if device.type == "cuda": torch.cuda.synchronize()
-    elif device.type == "mps": torch.mps.synchronize()
+    device_sync()
     headline_bpb = q_val_bpb
     log0(
         f"final_mixed_int6_int4_{_COMPRESSOR}_roundtrip val_loss:{q_val_loss:.4f} val_bpb:{headline_bpb:.4f} "
