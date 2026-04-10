@@ -1301,6 +1301,7 @@ def main() -> None:
                 (warmup_loss * grad_scale).backward()
             for opt in optimizers:
                 opt.step()
+            device_sync()  # XLA: compile+execute single-step graph
             zero_grad_all()
             if args.warmup_steps <= 20 or (warmup_step + 1) % 10 == 0 or warmup_step + 1 == args.warmup_steps:
                 log0(f"warmup_step:{warmup_step + 1}/{args.warmup_steps}")
@@ -1388,6 +1389,7 @@ def main() -> None:
             torch.nn.utils.clip_grad_norm_(base_model.parameters(), args.grad_clip_norm)
         for opt in optimizers:
             opt.step()
+        device_sync()  # XLA: compile+execute single-step graph
         zero_grad_all()
 
         step += 1
