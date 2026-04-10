@@ -1534,8 +1534,8 @@ def main() -> None:
     device_sync()
     t_qeval = time.perf_counter()
     if args.eval_stride > 0 and args.eval_stride < args.train_seq_len:
-        log0(f"final_eval_mode:sliding_window stride:{args.eval_stride} batch_seqs:{args.eval_batch_seqs} cache:{os.environ.get('EVAL_CACHE', '1')=='1'}")
-        if os.environ.get("EVAL_CACHE", "1") == "1":
+        log0(f"final_eval_mode:sliding_window stride:{args.eval_stride} batch_seqs:{args.eval_batch_seqs} cache:{os.environ.get('EVAL_CACHE', '0')=='1'}")
+        if os.environ.get("EVAL_CACHE", "0") == "1":
             q_val_loss, q_val_bpb = eval_val_sliding_cached(
                 args, base_model, rank, world_size, device,
                 val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
