@@ -1,13 +1,14 @@
 from typing import Any
 
 from google.adk.agents import llm_agent
-from google.adk.sessions import vertex_ai_session_service
+from google.adk.sessions import in_memory_session_service
+import vertexai
 from vertexai.preview.reasoning_engines import AdkApp
 from google.adk.tools import agent_tool
 from google.adk.tools.google_search_tool import GoogleSearchTool
 from google.adk.tools import url_context
 
-VertexAiSessionService = vertex_ai_session_service.VertexAiSessionService
+InMemorySessionService = in_memory_session_service.InMemorySessionService
 
 class AgentClass:
 
@@ -15,23 +16,24 @@ class AgentClass:
     self.app = None
 
   def session_service_builder(self):
-    return VertexAiSessionService()
+    return InMemorySessionService()
 
   def set_up(self):
     """Sets up the Multi-Agent ADK application."""
     import os
+    vertexai.init(project="gen-lang-client-0259360704", location="global")
 
     # Load local context dynamically so the Evolver always has the bleeding edge code.
     train_gpt_code = "Error: train_gpt.py not found."
     if os.path.exists("train_gpt.py"):
         with open("train_gpt.py", "r") as f:
-            train_gpt_code = f.read()
+            train_gpt_code = f.read().replace("{", "").replace("}", "").replace("pattern", "file_glob")
             
     arch_notes = "Error: architecture notes not found."
     arch_path = "architecture_notes/branch_notes/uniform-int4-baseline.md"
     if os.path.exists(arch_path):
         with open(arch_path, "r") as f:
-            arch_notes = f.read()
+            arch_notes = f.read().replace("{", "").replace("}", "").replace("pattern", "structural_math")
     
     evolver_instruction = f"""You are the Evolver Agent for Parameter Golf. Your only job is to generate high-quality code mutations for a given target (e.g. QAT ramp, pruning logic).
 When the user gives you a target:
@@ -127,8 +129,8 @@ if __name__ == "__main__":
             elif query.lower() == "/feed":
                 try:
                     with open("evolution_leaderboard.json", "r") as f:
-                        leaderboard = f.read()
-                    query = f"Here is the latest data from `evolution_leaderboard.json`:\n```json\n{leaderboard}\n```\nAnalyze these results, identify the winning mutation pattern, and generate 4 new sequence-ready mutations for the next generation. VERY IMPORTANT: You must output a single valid JSON array containing exactly 4 strings (the complete Python functions) at the very end of your response, wrapped in a ```json codeblock. This allows me to easily copy-paste the array directly into Colab."
+                        leaderboard = f.read().replace("{", "").replace("}", "").replace("pattern", "file_glob")
+                    query = f"Here is the latest data from `evolution_leaderboard.json`:\n```json\n{leaderboard}\n```\nAnalyze these results, identify the winning mutation approach, and generate 4 new sequence-ready mutations for the next generation. VERY IMPORTANT: You must output a single valid JSON array containing exactly 4 strings (the complete Python functions) at the very end of your response, wrapped in a ```json codeblock. This allows me to easily copy-paste the array directly into Colab."
                     print("✅ Automatically injected evolution_leaderboard.json into context. Analyzing...\n")
                 except FileNotFoundError:
                     print("❌ Error: evolution_leaderboard.json not found in this directory. Run a generation in Colab first to generate it.")
